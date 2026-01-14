@@ -21,6 +21,7 @@ from services.nlp.chunk_filter import is_informative_chunk
 from services.nlp.sentence_utils import split_into_sentences
 from services.nlp.sentence_ranker import rank_sentences
 from services.nlp.summarizer_bart import rewrite_to_plain_language
+from services.nlp.extractive_summarizer import extract_key_information
 from google import genai
 
 load_dotenv()
@@ -125,11 +126,11 @@ def generate_scratch_summary():
     
     file_hash = data["hash"]
     
-    # Try to find file with either pdf or docx extension
+    # Try to find file with pdf, docx, or doc extension
     file_path = None
     ext = None
     
-    for extension in ["pdf", "docx"]:
+    for extension in ["pdf", "docx", "doc"]:
         potential_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_hash}.{extension}")
         if os.path.exists(potential_path):
             file_path = potential_path
@@ -139,33 +140,26 @@ def generate_scratch_summary():
     if not file_path:
         return jsonify({"error": "File not found"}), 404
 
-    # Extract text
-    if ext == "pdf":
-        raw_text = extract_text_from_pdf(file_path)
-    else:
-        raw_text = extract_text_from_docx(file_path)
+    try:
+        # Extract text
+        if ext == "pdf":
+            raw_text = extract_text_from_pdf(file_path)
+        else:
+            raw_text = extract_text_from_docx(file_path)
 
-    # Normalize & semantic chunking
-    normalized = normalize_text(raw_text)
-    chunks = semantic_chunk_text(normalized)
-
-    final_points = []
-
-    for chunk in chunks:
-        sentences = split_into_sentences(chunk)
-        if len(sentences) < 3:
-            continue
-
-        key_sentences = rank_sentences(sentences, top_k=10)
-        combined = " ".join(key_sentences)
-
-        rewritten = rewrite_to_plain_language(combined)
-        final_points.append(rewritten)
-
-    return jsonify({
-        "total_chunks": len(chunks),
-        "important_points": final_points[:15]  # top results
-    })
+        # Normalize text
+        normalized = normalize_text(raw_text)
+        
+        # Extract key sentences (this preserves original wording)
+        key_points = extract_key_information(normalized, num_sentences=25)
+        
+        return jsonify({
+            "total_text_length": len(raw_text),
+            "important_points": key_points
+        })
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate summary: {str(e)}"}), 500
 
 @app.route("/summary", methods=["POST"])
 def generate_summary():
