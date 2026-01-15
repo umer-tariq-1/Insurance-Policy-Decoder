@@ -22,10 +22,14 @@ from services.nlp.sentence_utils import split_into_sentences
 from services.nlp.sentence_ranker import rank_sentences
 from services.nlp.summarizer_bart import rewrite_to_plain_language
 from services.nlp.extractive_summarizer import extract_key_information
+from services.nlp.qa_service import get_qa_service
 from google import genai
 
 load_dotenv()
 app = Flask(__name__)
+
+# QA service cache: stores prepared documents by hash
+qa_document_cache = {}
 
 UPLOAD_FOLDER = "../uploads"
 ALLOWED_EXTENSIONS = {"pdf", "docx","doc"}
@@ -239,6 +243,122 @@ def generate_summary():
         
     except Exception as e:
         return jsonify({"error": f"Failed to generate summary: {str(e)}"}), 500
+
+
+@app.route("/scratch-qa", methods=["POST"])
+def question_answer():
+    """
+    Answer questions about an insurance document.
+    
+    Request body:
+    {
+        "hash": "document_hash",
+        "question": "What is my deductible?",
+        "detailed": false  // optional, defaults to false
+    }
+    """
+    data = request.get_json()
+    
+    # Validate request
+    if not data or "hash" not in data:
+        return jsonify({"error": "Hash required in request body"}), 400
+    
+    if "question" not in data or not data["question"].strip():
+        return jsonify({"error": "Question required in request body"}), 400
+    
+    file_hash = data["hash"]
+    question = data["question"].strip()
+    detailed = data.get("detailed", False)
+    
+    # Try to find file
+    file_path = None
+    ext = None
+    
+    for extension in ["pdf", "docx", "doc"]:
+        potential_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_hash}.{extension}")
+        if os.path.exists(potential_path):
+            file_path = potential_path
+            ext = extension
+            break
+    
+    if not file_path:
+        return jsonify({"error": "File not found"}), 404
+    
+    try:
+        # Get QA service
+        qa_service = get_qa_service()
+        
+        # Check if document is already prepared in cache
+        if file_hash not in qa_document_cache:
+            print(f"Preparing document {file_hash} for QA...")
+            
+            # Extract text
+            if ext == "pdf":
+                raw_text = extract_text_from_pdf(file_path)
+            else:
+                raw_text = extract_text_from_docx(file_path)
+            
+            # Normalize text
+            normalized_text = normalize_text(raw_text)
+            
+            # Prepare document for QA
+            qa_service.prepare_document(normalized_text)
+            
+            # Cache it
+            qa_document_cache[file_hash] = True
+            print(f"Document {file_hash} prepared and cached")
+        
+        # Answer the question
+        result = qa_service.answer_question(question, detailed=detailed)
+        
+        # Add metadata
+        result["hash"] = file_hash
+        result["question"] = question
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to answer question: {str(e)}"}), 500
+
+
+@app.route("/qa/clear-cache", methods=["POST"])
+def clear_qa_cache():
+    """
+    Clear the QA document cache.
+    Useful when you want to force re-processing of documents.
+    
+    Request body (optional):
+    {
+        "hash": "specific_document_hash"  // if provided, only clear this document
+    }
+    """
+    data = request.get_json() or {}
+    
+    if "hash" in data:
+        # Clear specific document
+        file_hash = data["hash"]
+        if file_hash in qa_document_cache:
+            del qa_document_cache[file_hash]
+            return jsonify({
+                "message": f"Cleared cache for document {file_hash}",
+                "remaining_cached": len(qa_document_cache)
+            })
+        else:
+            return jsonify({
+                "message": f"Document {file_hash} not in cache",
+                "remaining_cached": len(qa_document_cache)
+            })
+    else:
+        # Clear all cache
+        count = len(qa_document_cache)
+        qa_document_cache.clear()
+        return jsonify({
+            "message": f"Cleared all QA cache ({count} documents)",
+            "remaining_cached": 0
+        })
+
 
 if __name__ == "__main__":
     app.run(debug=True)
