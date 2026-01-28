@@ -35,6 +35,11 @@ from services.nlp.ollama_qa_service import (
     check_ollama_available as check_qa_ollama,
     configure_qa
 )
+from services.nlp.ollama_comparator import (
+    compare_policies,
+    quick_compare,
+    check_ollama_available as check_compare_ollama
+)
 from google import genai
 
 load_dotenv()
@@ -682,6 +687,142 @@ def clear_ollama_qa_cache():
             "message": f"Cleared all Ollama QA cache ({count} documents)",
             "remaining_cached": 0
         })
+
+
+@app.route("/compare", methods=["POST"])
+def compare_documents():
+    """
+    Compare two insurance policy documents side-by-side.
+
+    Request body:
+    {
+        "hash1": "first_document_hash",
+        "hash2": "second_document_hash",
+        "quick": false,  // optional: true for faster but less detailed comparison
+        "include_verdict": true  // optional: include AI recommendation
+    }
+
+    Returns comparison data structured for table display:
+    {
+        "categories": ["Policy Type", "Premium", ...],
+        "policy1": {
+            "hash": "hash1",
+            "values": ["Health Insurance", "$500/month", ...]
+        },
+        "policy2": {
+            "hash": "hash2",
+            "values": ["Health Insurance", "$450/month", ...]
+        },
+        "highlights": [...],  // Key differences
+        "verdict": "AI analysis..."  // Optional recommendation
+    }
+    """
+    data = request.get_json()
+
+    # Validate request
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    if "hash1" not in data or "hash2" not in data:
+        return jsonify({"error": "Both hash1 and hash2 are required"}), 400
+
+    hash1 = data["hash1"]
+    hash2 = data["hash2"]
+    quick_mode = data.get("quick", False)
+    include_verdict = data.get("include_verdict", True)
+
+    if hash1 == hash2:
+        return jsonify({"error": "Cannot compare a document with itself"}), 400
+
+    # Check Ollama availability
+    available, ollama_message = check_compare_ollama()
+    if not available:
+        return jsonify({
+            "error": f"Local LLM not available: {ollama_message}",
+            "setup_instructions": {
+                "1": "Install Ollama from https://ollama.ai",
+                "2": "Start Ollama: ollama serve",
+                "3": "Pull a model: ollama pull llama3.2:3b"
+            }
+        }), 503
+
+    # Find both files
+    def find_file(file_hash):
+        for extension in ["pdf", "docx", "doc"]:
+            potential_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_hash}.{extension}")
+            if os.path.exists(potential_path):
+                return potential_path, extension
+        return None, None
+
+    file_path1, ext1 = find_file(hash1)
+    file_path2, ext2 = find_file(hash2)
+
+    if not file_path1:
+        return jsonify({"error": f"File not found for hash1: {hash1}"}), 404
+
+    if not file_path2:
+        return jsonify({"error": f"File not found for hash2: {hash2}"}), 404
+
+    try:
+        # Extract text from both documents
+        print(f"Extracting text from document 1 ({hash1})...")
+        if ext1 == "pdf":
+            raw_text1 = extract_text_from_pdf(file_path1)
+        else:
+            raw_text1 = extract_text_from_docx(file_path1)
+
+        print(f"Extracting text from document 2 ({hash2})...")
+        if ext2 == "pdf":
+            raw_text2 = extract_text_from_pdf(file_path2)
+        else:
+            raw_text2 = extract_text_from_docx(file_path2)
+
+        # Normalize text
+        normalized1 = normalize_text(raw_text1)
+        normalized2 = normalize_text(raw_text2)
+
+        # Perform comparison
+        if quick_mode:
+            print("Performing quick comparison...")
+            result = quick_compare(normalized1, normalized2, hash1, hash2)
+        else:
+            print("Performing full comparison...")
+            result = compare_policies(
+                normalized1,
+                normalized2,
+                hash1,
+                hash2,
+                include_verdict=include_verdict
+            )
+
+        return jsonify(result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to compare documents: {str(e)}"}), 500
+
+
+@app.route("/compare/quick", methods=["POST"])
+def quick_compare_documents():
+    """
+    Quick comparison of two policies - faster but less detailed.
+    Focuses on top 10 most important differences.
+
+    Request body:
+    {
+        "hash1": "first_document_hash",
+        "hash2": "second_document_hash"
+    }
+    """
+    data = request.get_json()
+
+    if not data or "hash1" not in data or "hash2" not in data:
+        return jsonify({"error": "Both hash1 and hash2 are required"}), 400
+
+    # Reuse the main compare endpoint with quick=true
+    data["quick"] = True
+    return compare_documents()
 
 
 if __name__ == "__main__":
