@@ -29,6 +29,12 @@ from services.nlp.ollama_summarizer import (
     check_ollama_available,
     configure_summarizer
 )
+from services.nlp.ollama_qa_service import (
+    get_ollama_qa_service,
+    reset_qa_service,
+    check_ollama_available as check_qa_ollama,
+    configure_qa
+)
 from google import genai
 
 load_dotenv()
@@ -36,6 +42,9 @@ app = Flask(__name__)
 
 # QA service cache: stores prepared documents by hash
 qa_document_cache = {}
+
+# Ollama QA cache: stores which documents have been prepared for Ollama QA
+ollama_qa_cache = {}
 
 UPLOAD_FOLDER = "../uploads"
 ALLOWED_EXTENSIONS = {"pdf", "docx","doc"}
@@ -495,6 +504,182 @@ def clear_qa_cache():
         qa_document_cache.clear()
         return jsonify({
             "message": f"Cleared all QA cache ({count} documents)",
+            "remaining_cached": 0
+        })
+
+
+@app.route("/local-qa", methods=["POST"])
+def local_question_answer():
+    """
+    Answer questions about an insurance document using local LLM (Ollama).
+
+    Uses RAG (Retrieval Augmented Generation):
+    1. Retrieves relevant document sections using semantic search
+    2. Generates comprehensive answers using Ollama
+
+    Request body:
+    {
+        "hash": "document_hash",
+        "question": "What is my deductible?",
+        "detailed": false  // optional, includes source sections if true
+    }
+
+    Requires Ollama running locally with a model installed.
+    """
+    data = request.get_json()
+
+    # Validate request
+    if not data or "hash" not in data:
+        return jsonify({"error": "Hash required in request body"}), 400
+
+    if "question" not in data or not data["question"].strip():
+        return jsonify({"error": "Question required in request body"}), 400
+
+    file_hash = data["hash"]
+    question = data["question"].strip()
+    detailed = data.get("detailed", False)
+
+    # Check Ollama availability
+    available, ollama_message = check_qa_ollama()
+    if not available:
+        return jsonify({
+            "error": f"Local LLM not available: {ollama_message}",
+            "setup_instructions": {
+                "1": "Install Ollama from https://ollama.ai",
+                "2": "Start Ollama: ollama serve",
+                "3": "Pull a model: ollama pull llama3.2:3b"
+            }
+        }), 503
+
+    # Find the file
+    file_path = None
+    ext = None
+
+    for extension in ["pdf", "docx", "doc"]:
+        potential_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_hash}.{extension}")
+        if os.path.exists(potential_path):
+            file_path = potential_path
+            ext = extension
+            break
+
+    if not file_path:
+        return jsonify({"error": "File not found"}), 404
+
+    try:
+        # Get Ollama QA service
+        qa_service = get_ollama_qa_service()
+
+        # Check if document needs to be prepared
+        if file_hash not in ollama_qa_cache:
+            print(f"Preparing document {file_hash} for Ollama QA...")
+
+            # Extract text
+            if ext == "pdf":
+                raw_text = extract_text_from_pdf(file_path)
+            else:
+                raw_text = extract_text_from_docx(file_path)
+
+            # Normalize text
+            normalized_text = normalize_text(raw_text)
+
+            # Prepare document
+            prep_result = qa_service.prepare_document(normalized_text)
+
+            if "error" in prep_result:
+                return jsonify({"error": prep_result["error"]}), 400
+
+            # Cache it
+            ollama_qa_cache[file_hash] = True
+            print(f"Document {file_hash} prepared for Ollama QA ({prep_result['chunks']} chunks)")
+
+        # Answer the question
+        result = qa_service.answer_question(
+            question,
+            detailed=detailed,
+            include_sources=detailed
+        )
+
+        # Add metadata
+        result["hash"] = file_hash
+        result["question"] = question
+
+        return jsonify(result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to answer question: {str(e)}"}), 500
+
+
+@app.route("/local-qa/suggestions", methods=["POST"])
+def get_qa_suggestions():
+    """
+    Get suggested questions for a document.
+
+    Request body:
+    {
+        "hash": "document_hash"
+    }
+    """
+    data = request.get_json()
+
+    if not data or "hash" not in data:
+        return jsonify({"error": "Hash required in request body"}), 400
+
+    file_hash = data["hash"]
+
+    # Check if document is prepared
+    if file_hash not in ollama_qa_cache:
+        return jsonify({
+            "error": "Document not prepared for Q&A. Send a question first to prepare it.",
+            "suggestions": []
+        }), 400
+
+    try:
+        qa_service = get_ollama_qa_service()
+        suggestions = qa_service.get_suggested_questions()
+
+        return jsonify({
+            "hash": file_hash,
+            "suggestions": suggestions
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate suggestions: {str(e)}"}), 500
+
+
+@app.route("/local-qa/clear-cache", methods=["POST"])
+def clear_ollama_qa_cache():
+    """
+    Clear the Ollama QA document cache.
+
+    Request body (optional):
+    {
+        "hash": "specific_document_hash"  // if provided, only clear this document
+    }
+    """
+    data = request.get_json() or {}
+
+    if "hash" in data:
+        file_hash = data["hash"]
+        if file_hash in ollama_qa_cache:
+            del ollama_qa_cache[file_hash]
+            # Also reset the service to clear document data
+            reset_qa_service()
+            return jsonify({
+                "message": f"Cleared Ollama QA cache for document {file_hash}",
+                "remaining_cached": len(ollama_qa_cache)
+            })
+        else:
+            return jsonify({
+                "message": f"Document {file_hash} not in Ollama QA cache",
+                "remaining_cached": len(ollama_qa_cache)
+            })
+    else:
+        count = len(ollama_qa_cache)
+        ollama_qa_cache.clear()
+        reset_qa_service()
+        return jsonify({
+            "message": f"Cleared all Ollama QA cache ({count} documents)",
             "remaining_cached": 0
         })
 
