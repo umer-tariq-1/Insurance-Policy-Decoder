@@ -25,9 +25,10 @@ class SummaryConfig:
     """Configuration for the summarizer."""
     model: str = "llama3.2:3b"
     ollama_url: str = "http://localhost:11434"
-    max_chunk_tokens: int = 2000  # Safe limit for 3B models
+    max_chunk_tokens: int = 2500  # Token limit per chunk
     temperature: float = 0.3  # Lower = more focused/factual
-    num_ctx: int = 4096  # Context window
+    num_ctx: int = 8192  # Context window - increased for longer output
+    num_predict: int = 4096  # Max tokens to generate - allows longer responses
 
 
 # Global config instance
@@ -72,7 +73,7 @@ def check_ollama_available() -> tuple[bool, str]:
         return False, f"Error checking Ollama: {str(e)}"
 
 
-def _call_ollama(prompt: str, system_prompt: str = "") -> str:
+def _call_ollama(prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> str:
     """Make a request to Ollama API."""
     payload = {
         "model": _config.model,
@@ -82,13 +83,14 @@ def _call_ollama(prompt: str, system_prompt: str = "") -> str:
         "options": {
             "temperature": _config.temperature,
             "num_ctx": _config.num_ctx,
+            "num_predict": max_tokens or _config.num_predict,
         }
     }
 
     response = requests.post(
         f"{_config.ollama_url}/api/generate",
         json=payload,
-        timeout=120  # 2 min timeout for generation
+        timeout=300  # 5 min timeout for longer generation
     )
     response.raise_for_status()
 
@@ -136,65 +138,225 @@ def _chunk_text_for_llm(text: str, max_tokens: int = 2000) -> list[str]:
 
 
 # Insurance-specific system prompt
-INSURANCE_SYSTEM_PROMPT = """You are an expert insurance policy analyst. Your task is to extract and summarize the most important information from insurance policy documents.
+INSURANCE_SYSTEM_PROMPT = """You are an expert insurance policy analyst with years of experience helping consumers understand complex insurance documents. Your task is to create DETAILED, THOROUGH summaries that leave no important information behind.
 
-IMPORTANT GUIDELINES:
+CRITICAL GUIDELINES:
+- Be COMPREHENSIVE - include ALL relevant details, not just highlights
 - Be accurate and factual - only state what is explicitly in the document
-- Use specific numbers, dates, and amounts when available
-- Highlight information that directly affects the policyholder
-- Use clear, simple language that anyone can understand
-- Structure your response clearly with sections
-- Do NOT make assumptions or add information not in the document"""
+- Use specific numbers, dates, percentages, and amounts whenever available
+- Explain insurance jargon in plain language
+- Highlight information that directly affects the policyholder's rights, obligations, and finances
+- Structure your response with clear sections and sub-sections
+- Include context and explanations, not just bullet points
+- Do NOT make assumptions or add information not in the document
+- When in doubt, include more detail rather than less"""
 
 
-SECTION_EXTRACT_PROMPT = """Analyze this section of an insurance policy and extract key information.
-Focus on:
-- Coverage details (what's covered, limits, amounts)
-- Exclusions (what's NOT covered)
-- Costs (premiums, deductibles, co-pays)
-- Important conditions or requirements
-- Deadlines and waiting periods
+SECTION_EXTRACT_PROMPT = """Analyze this section of an insurance policy and extract ALL important information in detail.
+
+For each piece of information found, provide:
+- The specific detail (numbers, dates, percentages, conditions)
+- Any related conditions or requirements
+- Any exceptions or special cases mentioned
+
+Focus on extracting:
+1. COVERAGE DETAILS: What's covered, coverage limits, sub-limits, per-incident limits, annual maximums
+2. EXCLUSIONS: What's specifically NOT covered, circumstances that void coverage
+3. FINANCIAL TERMS: Premiums, deductibles, co-pays, co-insurance percentages, out-of-pocket maximums
+4. CONDITIONS: Pre-authorization requirements, network restrictions, waiting periods
+5. PROCEDURES: How to file claims, appeal processes, required documentation
+6. DEFINITIONS: Important terms defined in this section
+7. TIME LIMITS: Deadlines, grace periods, notification requirements
 
 TEXT TO ANALYZE:
 {text}
 
-Provide a bullet-point summary of the key information found. If the section doesn't contain relevant insurance details, respond with "No key insurance information in this section."
+Provide a DETAILED extraction with all specifics. Include exact amounts, percentages, and conditions. If the section doesn't contain relevant insurance details, respond with "No key insurance information in this section."
 """
 
 
-FINAL_SYNTHESIS_PROMPT = """Based on the following extracted information from an insurance policy, create a comprehensive summary.
+FINAL_SYNTHESIS_PROMPT = """Based on the following extracted information from an insurance policy, create a COMPREHENSIVE and DETAILED summary that a policyholder can use as a complete reference guide.
 
 EXTRACTED INFORMATION:
 {extracted_info}
 
-Create a well-organized summary with these sections (only include sections that have relevant information):
+Create a thorough, well-organized summary with ALL of the following sections. For each section, provide DETAILED explanations with specific numbers, dates, and conditions. Do not just list bullet points - explain what each item means for the policyholder.
 
-**POLICY OVERVIEW**
-Brief description of what this policy covers
+---
 
-**COVERAGE & BENEFITS**
-- What's covered
-- Coverage limits and amounts
+## POLICY OVERVIEW
+Provide a detailed description of:
+- Type of insurance policy and its primary purpose
+- Who is covered (insured parties, dependents, beneficiaries)
+- Policy period and effective dates
+- General scope of coverage
 
-**COSTS & PAYMENTS**
-- Premium information
-- Deductibles and co-pays
-- Out-of-pocket maximums
+## COVERAGE DETAILS & BENEFITS
 
-**EXCLUSIONS & LIMITATIONS**
-- What's NOT covered
-- Important restrictions
+### What's Covered
+List and explain each type of coverage included, with specific details about:
+- Coverage categories and what falls under each
+- Specific services, items, or situations covered
+- Any special benefits or riders included
 
-**KEY REQUIREMENTS**
-- Policyholder responsibilities
-- Claim procedures
-- Important deadlines
+### Coverage Limits & Amounts
+Detail all financial limits:
+- Per-incident/per-occurrence limits
+- Annual or lifetime maximums
+- Sub-limits for specific categories
+- Any caps on specific services
 
-**IMPORTANT WARNINGS**
-- Conditions that could void coverage
-- Critical terms to be aware of
+### Network & Provider Information
+If applicable:
+- In-network vs out-of-network coverage differences
+- How to find approved providers
+- Referral requirements
 
-Be specific with numbers and dates. Keep each point concise but informative."""
+## COSTS & FINANCIAL OBLIGATIONS
+
+### Premium Information
+- Premium amount and payment frequency
+- Payment methods accepted
+- Consequences of missed payments
+
+### Deductibles
+- Amount and type (per-incident vs annual)
+- What counts toward the deductible
+- Family vs individual deductibles if applicable
+
+### Co-payments & Co-insurance
+- Co-pay amounts for different services
+- Co-insurance percentages
+- When each applies
+
+### Out-of-Pocket Maximum
+- Maximum amount you'll pay annually
+- What counts toward this maximum
+- What happens after reaching the maximum
+
+## EXCLUSIONS & LIMITATIONS
+
+### What's NOT Covered
+List all exclusions with explanations:
+- Specific services or situations excluded
+- Pre-existing condition limitations
+- Experimental or investigational exclusions
+
+### Coverage Restrictions
+- Geographic limitations
+- Time-based restrictions
+- Quantity or frequency limits
+
+### Conditions That Could Void Coverage
+- Actions that could result in claim denial
+- Material misrepresentation consequences
+- Policy cancellation triggers
+
+## CLAIM PROCEDURES & REQUIREMENTS
+
+### How to File a Claim
+Step-by-step process:
+- Required documentation
+- Where and how to submit
+- Timeline for submission
+
+### Claim Processing
+- Expected processing time
+- How you'll be notified of decisions
+- Payment methods
+
+### Appeals Process
+- How to appeal a denied claim
+- Deadlines for appeals
+- Required information for appeals
+
+## POLICYHOLDER RESPONSIBILITIES
+
+### Required Actions
+- Notification requirements
+- Premium payment obligations
+- Cooperation requirements
+
+### Pre-authorization Requirements
+- Services requiring prior approval
+- How to obtain authorization
+- Consequences of not getting authorization
+
+## IMPORTANT DATES & DEADLINES
+
+List all time-sensitive information:
+- Policy effective and expiration dates
+- Open enrollment periods
+- Claim filing deadlines
+- Cancellation notice requirements
+- Waiting periods for specific coverages
+
+## RENEWAL & CANCELLATION
+
+### Renewal Terms
+- Automatic vs manual renewal
+- Rate change notifications
+- How to make changes at renewal
+
+### Cancellation Policy
+- How to cancel the policy
+- Refund policy for cancellations
+- When the insurer can cancel
+
+## CRITICAL WARNINGS & RED FLAGS
+
+Highlight the most important things the policyholder MUST know:
+- Common reasons for claim denial
+- Easy-to-miss requirements
+- Situations that could leave you unprotected
+- Time-sensitive requirements that if missed could cost you
+
+---
+
+Be thorough and specific. Use actual numbers, dates, and percentages from the document. Explain technical terms in plain language. This summary should serve as a complete reference that eliminates the need to read the full policy for most questions."""
+
+
+def _consolidate_extractions(extractions: list[str], max_tokens: int) -> str:
+    """
+    If extractions are too long, consolidate them in stages.
+    This preserves more information than simple truncation.
+    """
+    combined = "\n\n---\n\n".join(extractions)
+
+    if _estimate_tokens(combined) <= max_tokens:
+        return combined
+
+    # Split extractions into groups and summarize each group
+    print(f"Consolidating {len(extractions)} extractions (too long for single pass)...")
+
+    group_size = max(2, len(extractions) // 3)
+    groups = [extractions[i:i + group_size] for i in range(0, len(extractions), group_size)]
+
+    consolidated_parts = []
+    consolidation_prompt = """Consolidate and merge these extracted points into a comprehensive but more concise format.
+Keep ALL important details including specific numbers, dates, conditions, and requirements.
+Remove only redundant or duplicate information.
+
+EXTRACTIONS TO CONSOLIDATE:
+{text}
+
+Provide a consolidated summary that preserves all key information:"""
+
+    for group in groups:
+        group_text = "\n\n".join(group)
+        if _estimate_tokens(group_text) > 100:
+            try:
+                consolidated = _call_ollama(
+                    consolidation_prompt.format(text=group_text),
+                    INSURANCE_SYSTEM_PROMPT,
+                    max_tokens=1500
+                )
+                consolidated_parts.append(consolidated)
+            except Exception as e:
+                print(f"Warning: Consolidation failed, using original: {e}")
+                consolidated_parts.append(group_text[:max_tokens * 2])  # Rough truncation as fallback
+
+    return "\n\n---\n\n".join(consolidated_parts)
 
 
 def generate_summary_with_ollama(
@@ -219,15 +381,18 @@ def generate_summary_with_ollama(
         raise RuntimeError(f"Ollama not available: {message}")
 
     # Step 1: Optionally prefilter with extractive summarization
+    # Use MORE sentences for detailed summaries
     if use_extractive_prefilter:
-        num_sentences = 50 if detailed else 30
+        num_sentences = 150 if detailed else 80
         key_sentences = extract_key_information(text, num_sentences=num_sentences)
         working_text = "\n\n".join(key_sentences)
+        print(f"Extracted {len(key_sentences)} key sentences for processing")
     else:
         working_text = text
 
     # Step 2: Chunk the text for processing
     chunks = _chunk_text_for_llm(working_text, _config.max_chunk_tokens)
+    print(f"Processing {len(chunks)} text chunks...")
 
     # Step 3: Extract key information from each chunk
     extracted_parts = []
@@ -237,9 +402,10 @@ def generate_summary_with_ollama(
             continue
 
         prompt = SECTION_EXTRACT_PROMPT.format(text=chunk)
+        print(f"  Processing chunk {i+1}/{len(chunks)}...")
 
         try:
-            extraction = _call_ollama(prompt, INSURANCE_SYSTEM_PROMPT)
+            extraction = _call_ollama(prompt, INSURANCE_SYSTEM_PROMPT, max_tokens=1500)
 
             # Skip non-informative extractions
             if "no key insurance information" not in extraction.lower():
@@ -255,27 +421,32 @@ def generate_summary_with_ollama(
             "sections_processed": 0
         }
 
-    # Step 4: Synthesize final summary
-    combined_extractions = "\n\n---\n\n".join(extracted_parts)
+    print(f"Extracted information from {len(extracted_parts)} chunks")
 
-    # If combined extractions are too long, we need to summarize in stages
-    if _estimate_tokens(combined_extractions) > _config.max_chunk_tokens:
-        # Truncate to fit (keep first and last parts which often have key info)
-        max_chars = _config.max_chunk_tokens * 4
-        half = max_chars // 2
-        combined_extractions = combined_extractions[:half] + "\n\n[...]\n\n" + combined_extractions[-half:]
+    # Step 4: Consolidate extractions if too long (instead of truncating)
+    max_synthesis_tokens = _config.num_ctx // 2  # Leave room for prompt and output
+    combined_extractions = _consolidate_extractions(extracted_parts, max_synthesis_tokens)
 
+    # Step 5: Generate final comprehensive summary
+    print("Generating final comprehensive summary...")
     synthesis_prompt = FINAL_SYNTHESIS_PROMPT.format(extracted_info=combined_extractions)
-    final_summary = _call_ollama(synthesis_prompt, INSURANCE_SYSTEM_PROMPT)
+
+    # Allow longer output for the final summary
+    final_summary = _call_ollama(
+        synthesis_prompt,
+        INSURANCE_SYSTEM_PROMPT,
+        max_tokens=_config.num_predict  # Use full allowed output length
+    )
 
     return {
         "summary": final_summary.strip(),
         "model": _config.model,
-        "sections_processed": len(extracted_parts)
+        "sections_processed": len(extracted_parts),
+        "sentences_analyzed": len(key_sentences) if use_extractive_prefilter else "N/A"
     }
 
 
-def generate_quick_summary(text: str, max_points: int = 10) -> dict:
+def generate_quick_summary(text: str, max_points: int = 20) -> dict:
     """
     Generate a quick bullet-point summary (faster, less comprehensive).
     Good for initial overview or when speed is important.
@@ -285,7 +456,7 @@ def generate_quick_summary(text: str, max_points: int = 10) -> dict:
         raise RuntimeError(f"Ollama not available: {message}")
 
     # Extract key sentences first
-    key_sentences = extract_key_information(text, num_sentences=20)
+    key_sentences = extract_key_information(text, num_sentences=40)
     key_text = "\n".join(f"- {s}" for s in key_sentences)
 
     prompt = f"""From these key sentences from an insurance policy, identify the {max_points} MOST important points a policyholder must know.
@@ -293,12 +464,14 @@ def generate_quick_summary(text: str, max_points: int = 10) -> dict:
 KEY SENTENCES:
 {key_text}
 
-Provide exactly {max_points} bullet points, each starting with a category in brackets like [COVERAGE], [COST], [EXCLUSION], [DEADLINE], [REQUIREMENT], or [WARNING].
+Provide exactly {max_points} detailed bullet points organized by category. Each point should include specific numbers, dates, or conditions when available.
 
-Format:
-[CATEGORY] Concise point about that topic"""
+Categories to use: [COVERAGE], [BENEFIT], [COST], [DEDUCTIBLE], [EXCLUSION], [LIMIT], [DEADLINE], [REQUIREMENT], [CLAIM], [WARNING]
 
-    result = _call_ollama(prompt, INSURANCE_SYSTEM_PROMPT)
+Format each point as:
+[CATEGORY] Detailed explanation including specific amounts, conditions, or requirements"""
+
+    result = _call_ollama(prompt, INSURANCE_SYSTEM_PROMPT, max_tokens=2000)
 
     # Parse into structured format
     points = []

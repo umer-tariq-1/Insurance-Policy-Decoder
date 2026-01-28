@@ -306,7 +306,7 @@ def configure_ollama():
         return jsonify({"error": f"Failed to configure: {str(e)}"}), 400
 
 
-@app.route("/summary", methods=["POST"])
+@app.route("/gemini-api-summary", methods=["POST"])
 def generate_summary():
     data = request.get_json()
     
