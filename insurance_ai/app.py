@@ -23,6 +23,12 @@ from services.nlp.sentence_ranker import rank_sentences
 from services.nlp.summarizer_bart import rewrite_to_plain_language
 from services.nlp.extractive_summarizer import extract_key_information
 from services.nlp.qa_service import get_qa_service
+from services.nlp.ollama_summarizer import (
+    summarize_insurance_policy,
+    generate_quick_summary,
+    check_ollama_available,
+    configure_summarizer
+)
 from google import genai
 
 load_dotenv()
@@ -161,9 +167,144 @@ def generate_scratch_summary():
             "total_text_length": len(raw_text),
             "important_points": key_points
         })
-        
+
     except Exception as e:
         return jsonify({"error": f"Failed to generate summary: {str(e)}"}), 500
+
+
+@app.route("/local-summary", methods=["POST"])
+def generate_local_summary():
+    """
+    Generate insurance policy summary using local LLM (Ollama).
+
+    Request body:
+    {
+        "hash": "document_hash",
+        "mode": "standard"  // optional: "quick", "standard", or "comprehensive"
+    }
+
+    Requires Ollama running locally with a model installed.
+    Recommended: ollama pull llama3.2:3b
+    """
+    data = request.get_json()
+
+    if not data or "hash" not in data:
+        return jsonify({"error": "Hash required in request body"}), 400
+
+    file_hash = data["hash"]
+    mode = data.get("mode", "standard")
+
+    if mode not in ["quick", "standard", "comprehensive"]:
+        return jsonify({"error": "Mode must be 'quick', 'standard', or 'comprehensive'"}), 400
+
+    # Check Ollama availability first
+    available, ollama_message = check_ollama_available()
+    if not available:
+        return jsonify({
+            "error": f"Local LLM not available: {ollama_message}",
+            "setup_instructions": {
+                "1": "Install Ollama from https://ollama.ai",
+                "2": "Start Ollama: ollama serve",
+                "3": "Pull a model: ollama pull llama3.2:3b"
+            }
+        }), 503
+
+    # Find the file
+    file_path = None
+    ext = None
+
+    for extension in ["pdf", "docx", "doc"]:
+        potential_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_hash}.{extension}")
+        if os.path.exists(potential_path):
+            file_path = potential_path
+            ext = extension
+            break
+
+    if not file_path:
+        return jsonify({"error": "File not found"}), 404
+
+    try:
+        # Extract text
+        if ext == "pdf":
+            raw_text = extract_text_from_pdf(file_path)
+        else:
+            raw_text = extract_text_from_docx(file_path)
+
+        # Normalize text
+        normalized = normalize_text(raw_text)
+
+        # Generate summary using local LLM
+        result = summarize_insurance_policy(normalized, mode=mode)
+
+        return jsonify({
+            "hash": file_hash,
+            "mode": mode,
+            **result
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to generate summary: {str(e)}"}), 500
+
+
+@app.route("/ollama/status", methods=["GET"])
+def ollama_status():
+    """Check if Ollama is running and which models are available."""
+    available, message = check_ollama_available()
+
+    status = {
+        "available": available,
+        "message": message
+    }
+
+    if not available:
+        status["setup_instructions"] = {
+            "1": "Install Ollama from https://ollama.ai",
+            "2": "Start Ollama: ollama serve",
+            "3": "Pull a model: ollama pull llama3.2:3b (recommended for 4GB VRAM)",
+            "alternative_models": [
+                "phi3:mini (fast, good quality)",
+                "qwen2.5:3b (good for structured output)",
+                "mistral:7b (if you have 8GB+ VRAM)"
+            ]
+        }
+
+    return jsonify(status), 200 if available else 503
+
+
+@app.route("/ollama/configure", methods=["POST"])
+def configure_ollama():
+    """
+    Configure Ollama settings.
+
+    Request body:
+    {
+        "model": "llama3.2:3b",  // optional
+        "ollama_url": "http://localhost:11434",  // optional
+        "temperature": 0.3  // optional, 0.0-1.0
+    }
+    """
+    data = request.get_json() or {}
+
+    try:
+        configure_summarizer(
+            model=data.get("model"),
+            ollama_url=data.get("ollama_url"),
+            temperature=data.get("temperature")
+        )
+
+        return jsonify({
+            "message": "Configuration updated",
+            "current_settings": {
+                "model": data.get("model", "unchanged"),
+                "ollama_url": data.get("ollama_url", "unchanged"),
+                "temperature": data.get("temperature", "unchanged")
+            }
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to configure: {str(e)}"}), 400
+
 
 @app.route("/summary", methods=["POST"])
 def generate_summary():
@@ -244,7 +385,6 @@ def generate_summary():
     except Exception as e:
         return jsonify({"error": f"Failed to generate summary: {str(e)}"}), 500
 
-
 @app.route("/scratch-qa", methods=["POST"])
 def question_answer():
     """
@@ -321,7 +461,6 @@ def question_answer():
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"Failed to answer question: {str(e)}"}), 500
-
 
 @app.route("/qa/clear-cache", methods=["POST"])
 def clear_qa_cache():
