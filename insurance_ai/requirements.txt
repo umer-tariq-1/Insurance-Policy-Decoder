@@ -1,6 +1,8 @@
 flask
 flask-cors
 werkzeug
+python-dotenv
+requests
 
 pdfplumber
 python-docx
@@ -14,3 +16,5 @@ faiss-cpu
 
 numpy
 scikit-learn
+
+google-genai
