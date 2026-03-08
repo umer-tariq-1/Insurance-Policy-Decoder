@@ -8,6 +8,8 @@ ENV/
 .env
 .env.local
 .env.*.local
+insurance_ai/.env
+*.env
 
 # Upload folder
 uploads/

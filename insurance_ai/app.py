@@ -1,6 +1,8 @@
 # insurance_ai/app.py
 import os
 import hashlib
+import json
+import re
 
 
 from flask import Flask, request, jsonify
@@ -261,6 +263,84 @@ def generate_local_summary():
         traceback.print_exc()
         return jsonify({"error": f"Failed to generate summary: {str(e)}"}), 500
 
+@app.route("/gemini-api-summary", methods=["POST"])
+def generate_summary():
+    data = request.get_json()
+    
+    if not data or "hash" not in data:
+        return jsonify({"error": "Hash required in request body"}), 400
+    
+    file_hash = data["hash"]
+    
+    # Try to find file with pdf, docx, or doc extension
+    file_path = None
+    
+    for extension in ["pdf", "docx", "doc"]:
+        potential_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_hash}.{extension}")
+        if os.path.exists(potential_path):
+            file_path = potential_path
+            break
+    
+    if not file_path:
+        return jsonify({"error": "File not found"}), 404
+
+    try:
+        # Initialize Gemini client
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        
+        # Upload the file using file= parameter (simple approach)
+        uploaded_file = client.files.upload(file=file_path)
+        
+        # Create prompt for insurance policy summary
+        prompt = """You are an insurance policy analyzer. Analyze this insurance policy document and provide a comprehensive summary that highlights all the critical information a policyholder MUST know.
+
+            Structure your response as follows:
+
+            **Policy Overview:**
+            - Policy type and coverage summary
+            - Key benefits and what's covered
+
+            **Important Coverage Details:**
+            - Coverage limits and amounts
+            - Deductibles and co-payments
+            - Exclusions (what's NOT covered)
+
+            **Policyholder Responsibilities:**
+            - Premium payment details
+            - Claim filing procedures
+            - Important deadlines or waiting periods
+
+            **Critical Terms & Conditions:**
+            - Renewal and cancellation policies
+            - Any penalties or fees
+            - Grace periods
+
+            **Key Dates & Deadlines:**
+            - Policy effective dates
+            - Important milestones or review dates
+
+            **Red Flags & Important Warnings:**
+            - Any clauses that could result in claim denial
+            - Limitations or restrictions to be aware of
+
+            Extract and present ONLY the information that actually exists in this document. Be specific with numbers, dates, and amounts. Make it easy to understand for someone who doesn't want to read the entire policy."""
+
+        # Generate summary with file
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=["Could you summarize this insurance policy?", uploaded_file, prompt]
+        )
+        
+        # Delete the uploaded file (cleanup)
+        client.files.delete(name=uploaded_file.name)
+        
+        return jsonify({
+            "hash": file_hash,
+            "summary": response.text
+        })
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate summary: {str(e)}"}), 500
 
 @app.route("/ollama/status", methods=["GET"])
 def ollama_status():
@@ -744,6 +824,270 @@ def quick_compare_documents():
     # Reuse the main compare endpoint with quick=true
     data["quick"] = True
     return compare_documents()
+
+
+@app.route("/gemini-api-qa", methods=["POST"])
+def gemini_question_answer():
+    """
+    Answer questions about an insurance document using Gemini API.
+
+    Request body:
+    {
+        "hash": "document_hash",
+        "question": "What is my deductible?",
+        "detailed": false  // optional, includes source excerpts if true
+    }
+    """
+    data = request.get_json()
+
+    if not data or "hash" not in data:
+        return jsonify({"error": "Hash required in request body"}), 400
+
+    if "question" not in data or not data["question"].strip():
+        return jsonify({"error": "Question required in request body"}), 400
+
+    file_hash = data["hash"]
+    question = data["question"].strip()
+    detailed = data.get("detailed", False)
+
+    # Find the file
+    file_path = None
+    for extension in ["pdf", "docx", "doc"]:
+        potential_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_hash}.{extension}")
+        if os.path.exists(potential_path):
+            file_path = potential_path
+            break
+
+    if not file_path:
+        return jsonify({"error": "File not found"}), 404
+
+    try:
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        uploaded_file = client.files.upload(file=file_path)
+
+        sources_instruction = (
+            '\n- Also extract 1-3 short verbatim text excerpts from the document that directly support your answer, '
+            'and include them in the "sources" array.'
+            if detailed else ""
+        )
+
+        prompt = f"""You are an insurance policy expert. Answer the following question based ONLY on the insurance policy document provided.
+
+Question: {question}
+
+Instructions:
+- Answer directly and clearly based only on what is in the document
+- Include specific details like amounts, dates, and percentages when available
+- If the information is not found in the document, set confidence to "none" and say so in the answer{sources_instruction}
+
+Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
+{{
+  "answer": "your detailed answer here",
+  "confidence": "high or medium or low or none",
+  "reasoning": "brief explanation of confidence level"{', "sources": ["relevant excerpt 1", "relevant excerpt 2"]' if detailed else ""}
+}}"""
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[uploaded_file, prompt]
+        )
+
+        client.files.delete(name=uploaded_file.name)
+
+        response_text = response.text.strip()
+        # Strip markdown code fences if present
+        response_text = re.sub(r"^```(?:json)?\s*", "", response_text)
+        response_text = re.sub(r"\s*```$", "", response_text)
+
+        try:
+            result = json.loads(response_text)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                result = {"answer": response_text, "confidence": "medium"}
+
+        response_data = {
+            "hash": file_hash,
+            "question": question,
+            "answer": result.get("answer", response_text),
+            "confidence": result.get("confidence", "medium"),
+            "model": "gemini-2.5-flash"
+        }
+
+        if detailed:
+            response_data["sources"] = [
+                {"text": s, "relevance": 1.0} for s in result.get("sources", [])
+            ]
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to answer question: {str(e)}"}), 500
+
+
+COMPARISON_CATEGORIES = [
+    "Policy Type",
+    "Coverage Scope",
+    "Premium Amount",
+    "Deductible",
+    "Co-payment/Co-insurance",
+    "Out-of-Pocket Maximum",
+    "Coverage Limit (Per Incident)",
+    "Coverage Limit (Annual/Lifetime)",
+    "In-Network Benefits",
+    "Out-of-Network Benefits",
+    "Waiting Period",
+    "Pre-existing Conditions",
+    "Key Exclusions",
+    "Claim Filing Process",
+    "Claim Deadline",
+    "Cancellation Policy",
+    "Renewal Terms",
+    "Grace Period",
+    "Key Warnings/Red Flags",
+    "Special Benefits/Riders"
+]
+
+
+@app.route("/gemini-api-compare", methods=["POST"])
+def gemini_compare_documents():
+    """
+    Compare two insurance policy documents using Gemini API.
+
+    Request body:
+    {
+        "hash1": "first_document_hash",
+        "hash2": "second_document_hash",
+        "include_verdict": true  // optional
+    }
+
+    Returns same structure as /compare for frontend compatibility.
+    """
+    data = request.get_json()
+
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    if "hash1" not in data or "hash2" not in data:
+        return jsonify({"error": "Both hash1 and hash2 are required"}), 400
+
+    hash1 = data["hash1"]
+    hash2 = data["hash2"]
+    include_verdict = data.get("include_verdict", True)
+
+    if hash1 == hash2:
+        return jsonify({"error": "Cannot compare a document with itself"}), 400
+
+    def find_file(file_hash):
+        for extension in ["pdf", "docx", "doc"]:
+            potential_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_hash}.{extension}")
+            if os.path.exists(potential_path):
+                return potential_path
+        return None
+
+    file_path1 = find_file(hash1)
+    file_path2 = find_file(hash2)
+
+    if not file_path1:
+        return jsonify({"error": f"File not found for hash1: {hash1}"}), 404
+    if not file_path2:
+        return jsonify({"error": f"File not found for hash2: {hash2}"}), 404
+
+    try:
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+        uploaded_file1 = client.files.upload(file=file_path1)
+        uploaded_file2 = client.files.upload(file=file_path2)
+
+        verdict_instruction = (
+            '\n- Provide a "verdict" field with a clear recommendation on which policy is better overall and why.'
+            if include_verdict else
+            '\n- Omit the "verdict" field.'
+        )
+
+        prompt = f"""You are an insurance policy comparison expert. Compare the two uploaded insurance policy documents.
+
+The FIRST uploaded document is Policy 1. The SECOND uploaded document is Policy 2.
+
+Extract values for EXACTLY these 20 categories IN THIS ORDER:
+{json.dumps(COMPARISON_CATEGORIES, indent=2)}
+
+Rules:
+- Provide a concise value (1 sentence max) for each category based only on document content
+- If a category is not mentioned in the document, use "Not specified"
+- policy1_values and policy2_values must each have EXACTLY 20 entries in the same order as the categories above
+- highlights: list 3-6 of the most important differences that would influence a purchasing decision{verdict_instruction}
+
+Respond ONLY with valid JSON (no markdown, no extra text):
+{{
+  "policy1_values": ["value1", "value2", ..., "value20"],
+  "policy2_values": ["value1", "value2", ..., "value20"],
+  "highlights": [
+    {{"category": "category name", "type": "cost or coverage or risk", "policy1": "value", "policy2": "value", "note": "brief analysis"}}
+  ]{', "verdict": "overall recommendation"' if include_verdict else ""}
+}}"""
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                "Policy 1:", uploaded_file1,
+                "Policy 2:", uploaded_file2,
+                prompt
+            ]
+        )
+
+        client.files.delete(name=uploaded_file1.name)
+        client.files.delete(name=uploaded_file2.name)
+
+        response_text = response.text.strip()
+        response_text = re.sub(r"^```(?:json)?\s*", "", response_text)
+        response_text = re.sub(r"\s*```$", "", response_text)
+
+        try:
+            result = json.loads(response_text)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                return jsonify({"error": "Failed to parse Gemini comparison response"}), 500
+
+        policy1_values = result.get("policy1_values", [])
+        policy2_values = result.get("policy2_values", [])
+
+        # Pad to exactly 20 if Gemini returned fewer
+        while len(policy1_values) < 20:
+            policy1_values.append("Not specified")
+        while len(policy2_values) < 20:
+            policy2_values.append("Not specified")
+
+        response_data = {
+            "categories": COMPARISON_CATEGORIES,
+            "policy1": {
+                "hash": hash1,
+                "values": policy1_values[:20]
+            },
+            "policy2": {
+                "hash": hash2,
+                "values": policy2_values[:20]
+            },
+            "highlights": result.get("highlights", []),
+            "model": "gemini-2.5-flash"
+        }
+
+        if include_verdict:
+            response_data["verdict"] = result.get("verdict", "")
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to compare documents: {str(e)}"}), 500
 
 
 if __name__ == "__main__":

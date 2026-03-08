@@ -13,15 +13,17 @@ Complete API reference for frontend integration.
    - [Upload Document](#upload-document)
    - [Get Document Content](#get-document-content)
 3. [Document Summarization](#document-summarization)
-   - [Local AI Summary (Recommended)](#local-ai-summary-recommended)
-   - [Gemini API Summary](#gemini-api-summary)
+   - [Gemini API Summary (Recommended)](#gemini-api-summary-recommended)
    - [Research: Extractive Summary](#research-extractive-summary)
+   - [Local AI Summary](#local-ai-summary)
 4. [Question & Answer](#question--answer)
-   - [Local AI Q&A (Recommended)](#local-ai-qa-recommended)
-   - [Get Suggested Questions](#get-suggested-questions)
+   - [Gemini API Q&A (Recommended)](#gemini-api-qa-recommended)
    - [Research: BERT Q&A](#research-bert-qa)
+   - [Local AI Q&A](#local-ai-qa)
+   - [Get Suggested Questions](#get-suggested-questions)
 5. [Document Comparison](#document-comparison)
-   - [Full Comparison](#full-comparison)
+   - [Gemini API Comparison (Recommended)](#gemini-api-comparison-recommended)
+   - [Local AI Comparison](#local-ai-comparison)
    - [Quick Comparison](#quick-comparison)
 6. [System & Configuration](#system--configuration)
    - [Health Check](#health-check)
@@ -40,21 +42,22 @@ Complete API reference for frontend integration.
 | Category            | Prefix                 | Description                                        |
 | ------------------- | ---------------------- | -------------------------------------------------- |
 | Document Management | `/upload`, `/content`  | Upload and extract document content                |
-| Local AI (Ollama)   | `/local-*`             | High-quality AI features using local LLM           |
-| Gemini Cloud        | `/gemini-*`            | Cloud-based AI (requires API key)                  |
-| Research/Academic   | `/scratch-*`           | BERT-based implementations for academic comparison |
-| Comparison          | `/compare`             | Side-by-side policy comparison                     |
+| Gemini Cloud        | `/gemini-*`            | Cloud-based AI (primary — use these in frontend)   |
+| Local AI (Ollama)   | `/local-*`             | Local LLM features (requires Ollama installed)     |
+| Research/Academic   | `/scratch-*`           | BERT-based implementations, do not use in frontend |
 | System              | `/health`, `/ollama/*` | Health checks and configuration                    |
 
-### Recommended Routes for Production
+### Recommended Routes for Frontend
 
-For the best user experience, use these routes:
+Use these Gemini endpoints as the primary implementation:
 
-| Feature    | Recommended Route | Fallback              |
-| ---------- | ----------------- | --------------------- |
-| Summary    | `/local-summary`  | `/gemini-api-summary` |
-| Q&A        | `/local-qa`       | `/scratch-qa`         |
-| Comparison | `/compare`        | -                     |
+| Feature    | Primary Route           | Fallback (if no API key) |
+| ---------- | ----------------------- | ------------------------ |
+| Summary    | `/gemini-api-summary`   | `/local-summary`         |
+| Q&A        | `/gemini-api-qa`        | `/local-qa`              |
+| Comparison | `/gemini-api-compare`   | `/compare`               |
+
+> **Why Gemini?** The local machine does not have sufficient GPU resources to run local pretrained models reliably. Gemini API provides fast, high-quality results without local hardware requirements.
 
 ---
 
@@ -154,108 +157,9 @@ Extract and retrieve the raw text content from an uploaded document.
 
 ## Document Summarization
 
-### Local AI Summary (Summary using Ollama, integrate with Frontend)
+### Gemini API Summary (Recommended)
 
-Generate a comprehensive insurance policy summary using local Ollama LLM.
-
-**Endpoint:** `POST /local-summary`
-
-**Content-Type:** `application/json`
-
-**Request Body:**
-
-```json
-{
-  "hash": "a1b2c3d4e5f6789...",
-  "mode": "standard"
-}
-```
-
-| Field | Type   | Required | Default    | Description                                                         |
-| ----- | ------ | -------- | ---------- | ------------------------------------------------------------------- |
-| hash  | string | Yes      | -          | Document hash from upload                                           |
-| mode  | string | No       | "standard" | Summary detail level: `"quick"`, `"standard"`, or `"comprehensive"` |
-
-**Mode Options:**
-
-| Mode          | Speed             | Detail Level                    | Best For       |
-| ------------- | ----------------- | ------------------------------- | -------------- |
-| quick         | Fast (~30s)       | Bullet points (20 items)        | Quick overview |
-| standard      | Medium (~1-2 min) | Structured sections             | Regular use    |
-| comprehensive | Slow (~3-5 min)   | Very detailed with all sections | Full analysis  |
-
-**Response - Standard/Comprehensive Mode (Success - 200):**
-
-```json
-{
-  "hash": "a1b2c3d4e5f6789...",
-  "mode": "standard",
-  "summary": "## POLICY OVERVIEW\n\nThis is a health insurance policy...\n\n## COVERAGE DETAILS & BENEFITS\n\n### What's Covered\n- Hospital stays...",
-  "model": "llama3.2:3b",
-  "sections_processed": 8,
-  "sentences_analyzed": 80
-}
-```
-
-**Response - Quick Mode (Success - 200):**
-
-```json
-{
-  "hash": "a1b2c3d4e5f6789...",
-  "mode": "quick",
-  "points": [
-    {
-      "category": "COVERAGE",
-      "content": "Covers hospitalization up to $1,000,000 annually"
-    },
-    {
-      "category": "DEDUCTIBLE",
-      "content": "Annual deductible of $500 per individual"
-    },
-    {
-      "category": "EXCLUSION",
-      "content": "Pre-existing conditions not covered for first 12 months"
-    },
-    {
-      "category": "WARNING",
-      "content": "Claims must be filed within 90 days of treatment"
-    }
-  ],
-  "model": "llama3.2:3b",
-  "type": "quick_summary"
-}
-```
-
-| Field              | Type    | Description                                                                                            |
-| ------------------ | ------- | ------------------------------------------------------------------------------------------------------ |
-| summary            | string  | Markdown-formatted summary (standard/comprehensive modes)                                              |
-| points             | array   | Array of categorized bullet points (quick mode)                                                        |
-| points[].category  | string  | Category: COVERAGE, BENEFIT, COST, DEDUCTIBLE, EXCLUSION, LIMIT, DEADLINE, REQUIREMENT, CLAIM, WARNING |
-| points[].content   | string  | The summary point content                                                                              |
-| model              | string  | AI model used                                                                                          |
-| sections_processed | integer | Number of document sections analyzed                                                                   |
-| sentences_analyzed | integer | Total sentences processed                                                                              |
-
-**Response (Ollama Not Running - 503):**
-
-```json
-{
-  "error": "Local LLM not available: Ollama not running. Start with: ollama serve",
-  "setup_instructions": {
-    "1": "Install Ollama from https://ollama.ai",
-    "2": "Start Ollama: ollama serve",
-    "3": "Pull a model: ollama pull llama3.2:3b"
-  }
-}
-```
-
-**Purpose:** Generate a detailed, structured summary of an insurance policy. The summary covers policy overview, coverage details, costs, exclusions, claim procedures, and important warnings. Use this as the primary summary feature.
-
----
-
-### Gemini API Summary (Summary using Gemini API, donot integrate with Frontend)
-
-Generate summary using Google's Gemini AI (cloud-based).
+Generate a comprehensive insurance policy summary using Google's Gemini AI.
 
 **Endpoint:** `POST /gemini-api-summary`
 
@@ -278,9 +182,14 @@ Generate summary using Google's Gemini AI (cloud-based).
 ```json
 {
   "hash": "a1b2c3d4e5f6789...",
-  "summary": "**Policy Overview:**\n- Policy type: Health Insurance..."
+  "summary": "**Policy Overview:**\n- Policy type: Health Insurance...\n\n**Important Coverage Details:**\n- Coverage limit: $1,000,000..."
 }
 ```
+
+| Field   | Type   | Description                              |
+| ------- | ------ | ---------------------------------------- |
+| hash    | string | Document hash                            |
+| summary | string | Markdown-formatted comprehensive summary |
 
 **Response (Error - 500):**
 
@@ -290,11 +199,11 @@ Generate summary using Google's Gemini AI (cloud-based).
 }
 ```
 
-**Purpose:** Alternative cloud-based summary option. Requires GEMINI_API_KEY in .env file. Use as fallback when Ollama is not available, or for comparison.
+**Purpose:** Generate a detailed, structured summary of an insurance policy using Gemini cloud AI. Covers policy overview, coverage details, costs, exclusions, claim procedures, and red flags. **Use this as the primary summary feature.**
 
 ---
 
-### Research: Extractive Summary (Summary using BERT, donot integrate with Frontend)
+### Research: Extractive Summary (do not integrate with Frontend)
 
 _Academic/Research implementation using BERT-based extractive summarization._
 
@@ -328,17 +237,69 @@ _Academic/Research implementation using BERT-based extractive summarization._
 | total_text_length | integer | Length of original document text                |
 | important_points  | array   | Array of extracted key sentences (25 sentences) |
 
-**Purpose:** This is an academic implementation showing extractive summarization using BERT embeddings and semantic similarity. It extracts existing sentences rather than generating new text. Included to demonstrate research methodology. **For production, use `/local-summary` instead.**
+**Purpose:** Academic implementation showing extractive summarization using BERT embeddings and semantic similarity. Extracts existing sentences rather than generating new text. **For production, use `/gemini-api-summary` instead.**
+
+---
+
+### Local AI Summary
+
+Generate a summary using local Ollama LLM. Requires Ollama running locally.
+
+**Endpoint:** `POST /local-summary`
+
+**Content-Type:** `application/json`
+
+**Request Body:**
+
+```json
+{
+  "hash": "a1b2c3d4e5f6789...",
+  "mode": "standard"
+}
+```
+
+| Field | Type   | Required | Default    | Description                                                         |
+| ----- | ------ | -------- | ---------- | ------------------------------------------------------------------- |
+| hash  | string | Yes      | -          | Document hash from upload                                           |
+| mode  | string | No       | "standard" | Summary detail level: `"quick"`, `"standard"`, or `"comprehensive"` |
+
+**Response - Standard/Comprehensive Mode (Success - 200):**
+
+```json
+{
+  "hash": "a1b2c3d4e5f6789...",
+  "mode": "standard",
+  "summary": "## POLICY OVERVIEW\n\nThis is a health insurance policy...",
+  "model": "llama3.2:3b",
+  "sections_processed": 8,
+  "sentences_analyzed": 80
+}
+```
+
+**Response (Ollama Not Running - 503):**
+
+```json
+{
+  "error": "Local LLM not available: Ollama not running. Start with: ollama serve",
+  "setup_instructions": {
+    "1": "Install Ollama from https://ollama.ai",
+    "2": "Start Ollama: ollama serve",
+    "3": "Pull a model: ollama pull llama3.2:3b"
+  }
+}
+```
+
+**Purpose:** Fallback summary option using a local Ollama model. Use only when Gemini API is unavailable.
 
 ---
 
 ## Question & Answer
 
-### Local AI Q&A (QnA using Ollama, integrate with Frontend)
+### Gemini API Q&A (Recommended)
 
-Ask questions about an insurance document and get AI-generated answers.
+Ask questions about an insurance document and get AI-generated answers using Gemini.
 
-**Endpoint:** `POST /local-qa`
+**Endpoint:** `POST /gemini-api-qa`
 
 **Content-Type:** `application/json`
 
@@ -352,11 +313,11 @@ Ask questions about an insurance document and get AI-generated answers.
 }
 ```
 
-| Field    | Type    | Required | Default | Description                                   |
-| -------- | ------- | -------- | ------- | --------------------------------------------- |
-| hash     | string  | Yes      | -       | Document hash from upload                     |
-| question | string  | Yes      | -       | Question to ask about the document            |
-| detailed | boolean | No       | false   | If true, includes source sections in response |
+| Field    | Type    | Required | Default | Description                                          |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------- |
+| hash     | string  | Yes      | -       | Document hash from upload                            |
+| question | string  | Yes      | -       | Question to ask about the document                   |
+| detailed | boolean | No       | false   | If true, includes source text excerpts in response   |
 
 **Response - Basic (Success - 200):**
 
@@ -364,10 +325,9 @@ Ask questions about an insurance document and get AI-generated answers.
 {
   "hash": "a1b2c3d4e5f6789...",
   "question": "What is my deductible amount?",
-  "answer": "Your annual deductible is $500 per individual. For family coverage, the combined deductible is $1,000. The deductible applies to most covered services except preventive care, which is covered at 100% with no deductible.",
+  "answer": "Your annual deductible is $500 per individual. For family coverage, the combined deductible is $1,000. The deductible applies to most covered services except preventive care, which is covered at 100%.",
   "confidence": "high",
-  "relevance_score": 0.847,
-  "model": "llama3.2:3b"
+  "model": "gemini-2.5-flash"
 }
 ```
 
@@ -379,16 +339,11 @@ Ask questions about an insurance document and get AI-generated answers.
   "question": "What is my deductible amount?",
   "answer": "Your annual deductible is $500 per individual...",
   "confidence": "high",
-  "relevance_score": 0.847,
-  "model": "llama3.2:3b",
+  "model": "gemini-2.5-flash",
   "sources": [
     {
-      "text": "Section 4: Cost Sharing. The annual deductible for individual coverage is $500. Family deductible is $1,000...",
-      "relevance": 0.847
-    },
-    {
-      "text": "Preventive care services are covered at 100% and do not apply to the deductible...",
-      "relevance": 0.723
+      "text": "Section 4: Cost Sharing. The annual deductible for individual coverage is $500...",
+      "relevance": 1.0
     }
   ]
 }
@@ -398,11 +353,10 @@ Ask questions about an insurance document and get AI-generated answers.
 | ------------------- | ------ | ------------------------------------------------------------ |
 | answer              | string | AI-generated answer to the question                          |
 | confidence          | string | Confidence level: `"high"`, `"medium"`, `"low"`, or `"none"` |
-| relevance_score     | float  | How relevant the found content is (0-1)                      |
-| sources             | array  | Source sections used to answer (only if detailed=true)       |
-| sources[].text      | string | Text excerpt from document                                   |
-| sources[].relevance | float  | Relevance score of this source                               |
-| note                | string | Additional info (appears when confidence is low)             |
+| model               | string | AI model used                                                |
+| sources             | array  | Source excerpts from document (only if `detailed=true`)      |
+| sources[].text      | string | Verbatim text excerpt from the document                      |
+| sources[].relevance | float  | Always 1.0 for Gemini responses                              |
 
 **Confidence Levels:**
 
@@ -413,50 +367,11 @@ Ask questions about an insurance document and get AI-generated answers.
 | low    | Answer uncertain                   | Show with warning styling          |
 | none   | No relevant info found             | Show "not found" message           |
 
-**Purpose:** Allow users to ask natural language questions about their insurance policy. Uses RAG (Retrieval Augmented Generation) to find relevant sections and generate accurate answers. This is the primary Q&A feature.
+**Purpose:** Allow users to ask natural language questions about their insurance policy. Gemini reads the full document and generates accurate, context-aware answers. **Use this as the primary Q&A feature.**
 
 ---
 
-### Get Suggested Questions
-
-Get AI-suggested questions for a document.
-
-**Endpoint:** `POST /local-qa/suggestions`
-
-**Content-Type:** `application/json`
-
-**Request Body:**
-
-```json
-{
-  "hash": "a1b2c3d4e5f6789..."
-}
-```
-
-**Note:** The document must have been prepared first by sending at least one question to `/local-qa`.
-
-**Response (Success - 200):**
-
-```json
-{
-  "hash": "a1b2c3d4e5f6789...",
-  "suggestions": [
-    "What is covered under this policy?",
-    "What are the main exclusions?",
-    "What is the deductible amount?",
-    "How do I file a claim?",
-    "What is the coverage limit?",
-    "Are pre-existing conditions covered?",
-    "What is the waiting period?"
-  ]
-}
-```
-
-**Purpose:** Provide users with helpful starting questions they can ask about their document. Display these as clickable suggestions in the UI.
-
----
-
-### Research: BERT Q&A (QnA using BERT, donot integrate with Frontend)
+### Research: BERT Q&A (do not integrate with Frontend)
 
 _Academic/Research implementation using BERT-based extractive QA._
 
@@ -486,17 +401,89 @@ _Academic/Research implementation using BERT-based extractive QA._
 }
 ```
 
-**Purpose:** Academic implementation using RoBERTa model trained on SQuAD 2.0 for extractive question answering. Extracts exact text spans from the document rather than generating answers. **For production, use `/local-qa` instead** as it provides more comprehensive answers.
+**Purpose:** Academic implementation using RoBERTa model trained on SQuAD 2.0 for extractive question answering. Extracts exact text spans rather than generating answers. **For production, use `/gemini-api-qa` instead.**
+
+---
+
+### Local AI Q&A
+
+Ask questions using local Ollama LLM with RAG. Requires Ollama running locally.
+
+**Endpoint:** `POST /local-qa`
+
+**Content-Type:** `application/json`
+
+**Request Body:**
+
+```json
+{
+  "hash": "a1b2c3d4e5f6789...",
+  "question": "What is my deductible?",
+  "detailed": false
+}
+```
+
+**Response (Success - 200):**
+
+```json
+{
+  "hash": "a1b2c3d4e5f6789...",
+  "question": "What is my deductible?",
+  "answer": "Your annual deductible is $500 per individual...",
+  "confidence": "high",
+  "relevance_score": 0.847,
+  "model": "llama3.2:3b"
+}
+```
+
+**Purpose:** Fallback Q&A option using local Ollama model with RAG. Use only when Gemini API is unavailable.
+
+---
+
+### Get Suggested Questions
+
+Get AI-suggested questions for a document. Requires the document to have been prepared via `/local-qa` first.
+
+**Endpoint:** `POST /local-qa/suggestions`
+
+**Content-Type:** `application/json`
+
+**Request Body:**
+
+```json
+{
+  "hash": "a1b2c3d4e5f6789..."
+}
+```
+
+**Response (Success - 200):**
+
+```json
+{
+  "hash": "a1b2c3d4e5f6789...",
+  "suggestions": [
+    "What is covered under this policy?",
+    "What are the main exclusions?",
+    "What is the deductible amount?",
+    "How do I file a claim?",
+    "What is the coverage limit?",
+    "Are pre-existing conditions covered?",
+    "What is the waiting period?"
+  ]
+}
+```
+
+**Purpose:** Provide users with helpful starting questions they can ask about their document. Display these as clickable suggestions in the UI.
 
 ---
 
 ## Document Comparison
 
-### Full Comparison (Comparison using Vectorization and Ollama, integrate with Frontend)
+### Gemini API Comparison (Recommended)
 
-Compare two insurance policies side-by-side across 20 categories.
+Compare two insurance policies side-by-side across 20 categories using Gemini AI. Returns the same response structure as `/compare` for full frontend compatibility.
 
-**Endpoint:** `POST /compare`
+**Endpoint:** `POST /gemini-api-compare`
 
 **Content-Type:** `application/json`
 
@@ -598,24 +585,22 @@ Compare two insurance policies side-by-side across 20 categories.
       "type": "cost",
       "policy1": "$500/month",
       "policy2": "$350/month",
-      "note": "lower is typically better"
+      "note": "Policy 2 is $150/month cheaper"
     },
     {
       "category": "Deductible",
       "type": "cost",
       "policy1": "$1,000 annual",
       "policy2": "$2,500 annual",
-      "note": "lower deductible means less out-of-pocket per claim"
+      "note": "Policy 1 has a lower deductible — less out-of-pocket per claim"
     }
   ],
-  "verdict": "Policy 1 offers more comprehensive coverage with lower deductibles and higher coverage limits, but at a higher premium. Policy 2 is more affordable but has higher out-of-pocket costs and more restrictions. Policy 1 is better for those who want maximum protection and can afford higher premiums. Policy 2 is suitable for healthy individuals who want basic coverage at lower cost.",
-  "model": "llama3.2:3b"
+  "verdict": "Policy 1 offers more comprehensive coverage with lower deductibles and higher coverage limits, but at a higher premium. Policy 2 is more affordable but has higher out-of-pocket costs and more restrictions.",
+  "model": "gemini-2.5-flash"
 }
 ```
 
 **Response Structure for Table Display:**
-
-The response is designed for easy table rendering:
 
 ```javascript
 // Example: Building a comparison table
@@ -638,16 +623,52 @@ categories.forEach((category, index) => {
 | policy1.values | array  | Values for each category (same order as categories) |
 | policy2.hash   | string | Hash of second document                             |
 | policy2.values | array  | Values for each category (same order as categories) |
-| highlights     | array  | Key differences with analysis                       |
+| highlights     | array  | Key differences with analysis (3-6 entries)         |
 | verdict        | string | AI recommendation and analysis                      |
+| model          | string | AI model used                                       |
 
-**Purpose:** Enable users to compare two insurance policies side-by-side. Display as a table with categories as rows and policies as columns. The highlights section shows the most important differences, and the verdict provides an AI-powered recommendation.
+**Purpose:** Compare two insurance policies side-by-side. Gemini reads both full documents and extracts comparable information. **Use this as the primary comparison feature.**
+
+---
+
+### Local AI Comparison
+
+Compare two policies using local Ollama LLM. Requires Ollama running locally.
+
+**Endpoint:** `POST /compare`
+
+**Content-Type:** `application/json`
+
+**Request Body:**
+
+```json
+{
+  "hash1": "a1b2c3d4e5f6789...",
+  "hash2": "x9y8z7w6v5u4321...",
+  "include_verdict": true
+}
+```
+
+Returns the same response structure as `/gemini-api-compare`. Use as fallback when Gemini API is unavailable.
+
+**Response (Ollama Not Running - 503):**
+
+```json
+{
+  "error": "Local LLM not available: Ollama not running. Start with: ollama serve",
+  "setup_instructions": {
+    "1": "Install Ollama from https://ollama.ai",
+    "2": "Start Ollama: ollama serve",
+    "3": "Pull a model: ollama pull llama3.2:3b"
+  }
+}
+```
 
 ---
 
 ### Quick Comparison
 
-Faster comparison focusing on top 10 differences.
+Faster comparison focusing on top 10 differences. Uses local Ollama.
 
 **Endpoint:** `POST /compare/quick`
 
@@ -685,7 +706,7 @@ Faster comparison focusing on top 10 differences.
 }
 ```
 
-**Purpose:** Quick overview of main differences between two policies. Use when speed is important or for an initial comparison before detailed analysis.
+**Purpose:** Quick overview of main differences. Use `/gemini-api-compare` for the full comparison.
 
 ---
 
@@ -704,8 +725,6 @@ Check if the Flask server is running.
   "status": "Flask server running"
 }
 ```
-
-**Purpose:** Basic health check for monitoring. Use to verify the backend is accessible.
 
 ---
 
@@ -742,8 +761,6 @@ Check if Ollama is running and the required model is available.
   }
 }
 ```
-
-**Purpose:** Check Ollama availability before showing AI features. If unavailable, show setup instructions or fall back to alternative features.
 
 ---
 
@@ -784,8 +801,6 @@ Change Ollama settings (model, URL, temperature).
 }
 ```
 
-**Purpose:** Advanced configuration for power users. Allow changing the AI model or adjusting response characteristics.
-
 ---
 
 ### Clear Caches
@@ -825,8 +840,6 @@ Clear document processing caches.
 }
 ```
 
-**Purpose:** Force re-processing of documents. Use when documents are updated or to free memory.
-
 ---
 
 ## Error Handling
@@ -853,13 +866,14 @@ All errors follow this format:
 
 ### Common Errors
 
-| Error                                 | Cause                            | Solution                      |
-| ------------------------------------- | -------------------------------- | ----------------------------- |
-| "Hash required in request body"       | Missing hash parameter           | Include the document hash     |
-| "File not found"                      | Invalid hash or document deleted | Re-upload the document        |
-| "Ollama not running"                  | Ollama service not started       | Run `ollama serve`            |
-| "Model not found"                     | AI model not downloaded          | Run `ollama pull llama3.2:3b` |
-| "Only PDF, DOCX or DOC files allowed" | Wrong file type                  | Upload supported file type    |
+| Error                                 | Cause                            | Solution                             |
+| ------------------------------------- | -------------------------------- | ------------------------------------ |
+| "Hash required in request body"       | Missing hash parameter           | Include the document hash            |
+| "Question required in request body"   | Missing question parameter       | Include the question string          |
+| "File not found"                      | Invalid hash or document deleted | Re-upload the document               |
+| "Ollama not running"                  | Ollama service not started       | Use Gemini endpoints or run `ollama serve` |
+| "Model not found"                     | AI model not downloaded          | Run `ollama pull llama3.2:3b`        |
+| "Only PDF, DOCX or DOC files allowed" | Wrong file type                  | Upload supported file type           |
 
 ---
 
@@ -868,9 +882,8 @@ All errors follow this format:
 ### Complete Upload and Summary Flow
 
 ```javascript
-// 1. Upload document
 async function uploadAndSummarize(file) {
-  // Upload
+  // 1. Upload document
   const formData = new FormData();
   formData.append("file", file);
 
@@ -880,11 +893,11 @@ async function uploadAndSummarize(file) {
   });
   const { hash } = await uploadResponse.json();
 
-  // Generate summary
-  const summaryResponse = await fetch("http://localhost:5000/local-summary", {
+  // 2. Generate summary using Gemini
+  const summaryResponse = await fetch("http://localhost:5000/gemini-api-summary", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ hash, mode: "standard" }),
+    body: JSON.stringify({ hash }),
   });
   const summary = await summaryResponse.json();
 
@@ -892,29 +905,27 @@ async function uploadAndSummarize(file) {
 }
 ```
 
-### Q&A Flow with Error Handling
+### Q&A Flow
 
 ```javascript
-async function askQuestion(hash, question) {
-  // Check Ollama status first
-  const statusResponse = await fetch("http://localhost:5000/ollama/status");
-  const status = await statusResponse.json();
-
-  if (!status.available) {
-    return {
-      error: "AI service not available",
-      instructions: status.setup_instructions,
-    };
-  }
-
-  // Ask question
-  const response = await fetch("http://localhost:5000/local-qa", {
+async function askQuestion(hash, question, detailed = false) {
+  const response = await fetch("http://localhost:5000/gemini-api-qa", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ hash, question, detailed: true }),
+    body: JSON.stringify({ hash, question, detailed }),
   });
 
-  return await response.json();
+  const data = await response.json();
+
+  if (data.error) {
+    console.error("Q&A failed:", data.error);
+    return null;
+  }
+
+  // data.confidence: "high" | "medium" | "low" | "none"
+  // data.answer: string
+  // data.sources: array (only if detailed=true)
+  return data;
 }
 ```
 
@@ -922,7 +933,7 @@ async function askQuestion(hash, question) {
 
 ```javascript
 async function comparePolicies(hash1, hash2) {
-  const response = await fetch("http://localhost:5000/compare", {
+  const response = await fetch("http://localhost:5000/gemini-api-compare", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ hash1, hash2, include_verdict: true }),
@@ -930,7 +941,7 @@ async function comparePolicies(hash1, hash2) {
 
   const data = await response.json();
 
-  // Build comparison table data
+  // Build comparison table
   const tableRows = data.categories.map((category, index) => ({
     category,
     policy1: data.policy1.values[index],
@@ -949,29 +960,25 @@ async function comparePolicies(hash1, hash2) {
 
 ## Quick Reference
 
-### Most Used Endpoints
+### Primary Endpoints (use these in the frontend)
 
-| Feature          | Endpoint         | Method           |
-| ---------------- | ---------------- | ---------------- |
-| Upload document  | `/upload`        | POST (multipart) |
-| Generate summary | `/local-summary` | POST             |
-| Ask question     | `/local-qa`      | POST             |
-| Compare policies | `/compare`       | POST             |
-| Check status     | `/ollama/status` | GET              |
+| Feature          | Endpoint                | Method           |
+| ---------------- | ----------------------- | ---------------- |
+| Upload document  | `/upload`               | POST (multipart) |
+| Generate summary | `/gemini-api-summary`   | POST             |
+| Ask question     | `/gemini-api-qa`        | POST             |
+| Compare policies | `/gemini-api-compare`   | POST             |
+| Health check     | `/health`               | GET              |
 
 ### Response Times (Approximate)
 
-| Endpoint         | Mode           | Expected Time                        |
-| ---------------- | -------------- | ------------------------------------ |
-| `/upload`        | -              | 1-3 seconds                          |
-| `/local-summary` | quick          | 30-60 seconds                        |
-| `/local-summary` | standard       | 1-2 minutes                          |
-| `/local-summary` | comprehensive  | 3-5 minutes                          |
-| `/local-qa`      | first question | 30-60 seconds (includes preparation) |
-| `/local-qa`      | subsequent     | 10-30 seconds                        |
-| `/compare`       | full           | 2-4 minutes                          |
-| `/compare/quick` | -              | 30-60 seconds                        |
+| Endpoint                | Expected Time  |
+| ----------------------- | -------------- |
+| `/upload`               | 1-3 seconds    |
+| `/gemini-api-summary`   | 10-30 seconds  |
+| `/gemini-api-qa`        | 5-15 seconds   |
+| `/gemini-api-compare`   | 15-40 seconds  |
 
 ---
 
-_API Documentation version 1.0_
+_API Documentation version 2.0_
