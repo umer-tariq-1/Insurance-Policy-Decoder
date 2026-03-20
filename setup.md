@@ -8,14 +8,13 @@ This guide will help you set up and run the Insurance Policy Decoder application
 
 1. [Prerequisites](#prerequisites)
 2. [Step 1: Install Python](#step-1-install-python)
-3. [Step 2: Install Ollama (Local AI)](#step-2-install-ollama-local-ai)
-4. [Step 3: Download AI Model](#step-3-download-ai-model)
-5. [Step 4: Set Up the Project](#step-4-set-up-the-project)
-6. [Step 5: Configure Environment Variables](#step-5-configure-environment-variables)
-7. [Step 6: Install Tesseract OCR (Optional)](#step-6-install-tesseract-ocr-optional)
-8. [Step 7: Run the Application](#step-7-run-the-application)
-9. [Verifying the Setup](#verifying-the-setup)
-10. [Troubleshooting](#troubleshooting)
+3. [Step 2: Set Up the Project](#step-2-set-up-the-project)
+4. [Step 3: Configure Gemini API Key](#step-3-configure-gemini-api-key)
+5. [Step 4: Install Tesseract OCR (Optional)](#step-4-install-tesseract-ocr-optional)
+6. [Step 5: Run the Application](#step-5-run-the-application)
+7. [Verifying the Setup](#verifying-the-setup)
+8. [Optional: Install Ollama (Local Fallback)](#optional-install-ollama-local-fallback)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -24,9 +23,11 @@ This guide will help you set up and run the Insurance Policy Decoder application
 Before you begin, make sure you have:
 
 - **Windows 10/11** (64-bit)
-- **8GB RAM minimum** (16GB recommended)
-- **10GB free disk space** (for AI models and dependencies)
-- **Internet connection** (for initial setup)
+- **4GB RAM minimum**
+- **Internet connection** (for Gemini API calls and initial setup)
+- **Google account** (to get a free Gemini API key)
+
+> **No GPU required.** All primary AI features run through the Google Gemini cloud API.
 
 ---
 
@@ -63,69 +64,7 @@ pip --version
 
 ---
 
-## Step 2: Install Ollama (Local AI)
-
-Ollama is the local AI engine that powers the summary, Q&A, and comparison features.
-
-### Download Ollama
-
-1. Go to [ollama.ai/download](https://ollama.ai/download)
-2. Click **"Download for Windows"**
-3. Run the installer (`OllamaSetup.exe`)
-4. Follow the installation wizard (default settings are fine)
-
-### Verify Ollama Installation
-
-After installation, open a **new Command Prompt** and run:
-
-```cmd
-ollama --version
-```
-
-You should see the version number.
-
----
-
-## Step 3: Download AI Model
-
-Now you need to download the AI model that will analyze insurance documents.
-
-### Start Ollama Service
-
-First, start the Ollama service by running:
-
-```cmd
-ollama serve
-```
-
-> **Note:** Keep this window open! Ollama needs to be running for the application to work.
-
-### Download the Model
-
-Open a **new Command Prompt window** (keep the previous one running) and run:
-
-```cmd
-ollama pull llama3.2:3b
-```
-
-This will download the Llama 3.2 3B model (~2GB download). Wait for it to complete.
-
-> **Tip:** If you have a powerful GPU with 8GB+ VRAM, you can use a larger model for better results:
-> ```cmd
-> ollama pull llama3.2:8b
-> ```
-
-### Verify Model Download
-
-```cmd
-ollama list
-```
-
-You should see `llama3.2:3b` in the list.
-
----
-
-## Step 4: Set Up the Project
+## Step 2: Set Up the Project
 
 ### Navigate to Project Folder
 
@@ -163,13 +102,22 @@ cd insurance_ai
 pip install -r requirements.txt
 ```
 
-This will install all required Python packages. This may take several minutes as it downloads AI/ML libraries.
+This will install all required Python packages. This may take several minutes as it downloads ML libraries.
 
 ---
 
-## Step 5: Configure Environment Variables
+## Step 3: Configure Gemini API Key
 
-### Create Environment File
+The Gemini API key is **required** — it powers all primary AI features (summary, Q&A, comparison, and risk scoring).
+
+### Get Gemini API Key
+
+1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+2. Sign in with your Google account
+3. Click **"Create API Key"**
+4. Copy the generated key
+
+### Create the .env File
 
 In the `insurance_ai` folder, there should be a file named `.env`. If not, create it:
 
@@ -177,32 +125,18 @@ In the `insurance_ai` folder, there should be a file named `.env`. If not, creat
 2. Add the following content:
 
 ```env
-GEMINI_API_KEY=your_gemini_api_key_here
-```
-
-3. Save as `.env` (make sure it's not saved as `.env.txt`)
-
-### Get Gemini API Key (Optional but Recommended)
-
-The Gemini API provides an additional cloud-based summary option.
-
-1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
-2. Sign in with your Google account
-3. Click **"Create API Key"**
-4. Copy the generated key
-5. Paste it in your `.env` file:
-
-```env
 GEMINI_API_KEY=AIzaSyD...your_actual_key...
 ```
 
-> **Note:** If you don't set up Gemini, the `/gemini-api-summary` route won't work, but all other routes will function normally with Ollama.
+3. Save as `.env` inside the `insurance_ai` folder (make sure it's not saved as `.env.txt`)
+
+> **Note:** Without this key, all `/gemini-*` endpoints will return an error. These are the primary endpoints used by the frontend.
 
 ---
 
-## Step 6: Install Tesseract OCR (Optional)
+## Step 4: Install Tesseract OCR (Optional)
 
-Tesseract is needed if you want to process scanned PDF documents (PDFs that are images rather than text).
+Tesseract is only needed to process scanned PDF documents (PDFs that are images rather than text).
 
 ### Download Tesseract
 
@@ -230,21 +164,11 @@ tesseract --version
 
 ---
 
-## Step 7: Run the Application
+## Step 5: Run the Application
 
-### Step 7a: Start Ollama (if not already running)
+### Start the Flask Server
 
-Open a Command Prompt and run:
-
-```cmd
-ollama serve
-```
-
-Keep this window open.
-
-### Step 7b: Start the Flask Server
-
-Open a **new Command Prompt**, navigate to the project, and run:
+Open Command Prompt, navigate to the project, and run:
 
 ```cmd
 cd "path\to\Insurance Policy Decoder"
@@ -261,6 +185,8 @@ You should see output like:
 ```
 
 **The application is now running!**
+
+> **No need to start Ollama** unless you want to use the optional local fallback routes (`/local-summary`, `/local-qa`, `/compare`).
 
 ---
 
@@ -279,59 +205,81 @@ You should see:
 {"status": "Flask server running"}
 ```
 
-### Check Ollama Connection
-
-Go to:
-
-```
-http://localhost:5000/ollama/status
-```
-
-You should see:
-```json
-{"available": true, "message": "OK"}
-```
-
-### Test with a Sample Document
+### Test a Gemini Endpoint
 
 You can test the API using tools like:
 - **Postman** (download from [postman.com](https://www.postman.com/downloads/))
 - **curl** (if installed)
 - **Thunder Client** (VS Code extension)
 
+Example test — upload a document and generate a summary:
+
+```
+POST http://localhost:5000/upload       (multipart, file field)
+POST http://localhost:5000/gemini-api-summary   (JSON, hash field)
+```
+
+---
+
+## Optional: Install Ollama (Local Fallback)
+
+Ollama is **not required** for normal use. Install it only if you want to use the local fallback routes (`/local-summary`, `/local-qa`, `/compare`) when the Gemini API is unavailable.
+
+### Download Ollama
+
+1. Go to [ollama.ai/download](https://ollama.ai/download)
+2. Click **"Download for Windows"**
+3. Run the installer (`OllamaSetup.exe`)
+
+### Download AI Model
+
+```cmd
+ollama serve
+```
+
+In a new window:
+
+```cmd
+ollama pull llama3.2:3b
+```
+
+This downloads the Llama 3.2 3B model (~2GB). Wait for it to complete.
+
+### Verify
+
+```cmd
+ollama list
+```
+
+You should see `llama3.2:3b` in the list. Check Ollama connectivity at:
+
+```
+http://localhost:5000/ollama/status
+```
+
 ---
 
 ## Troubleshooting
+
+### "API key not configured" error
+
+- The `.env` file is missing or the key is not set
+- Solution: Create `insurance_ai/.env` with `GEMINI_API_KEY=your_key`
 
 ### "Python is not recognized"
 
 - Python was not added to PATH during installation
 - Solution: Reinstall Python and check "Add Python to PATH"
 
-### "ollama is not recognized"
+### "Module not found" error
 
-- Ollama was not installed correctly or PATH not updated
-- Solution: Restart your computer after installing Ollama
-
-### "Ollama not running" error in the app
-
-- The Ollama service is not started
-- Solution: Run `ollama serve` in a separate Command Prompt
-
-### "Model not found" error
-
-- The AI model was not downloaded
-- Solution: Run `ollama pull llama3.2:3b`
+- The virtual environment is not activated
+- Solution: Run `venv\Scripts\activate` — you should see `(venv)` in the prompt
 
 ### Installation takes too long
 
 - The ML libraries (torch, transformers) are large
-- This is normal, the first installation can take 10-20 minutes
-
-### "CUDA out of memory" error
-
-- Your GPU doesn't have enough memory
-- Solution: The app will automatically use CPU if GPU memory is insufficient
+- This is normal — the first installation can take 10-20 minutes
 
 ### Port 5000 already in use
 
@@ -341,26 +289,30 @@ You can test the API using tools like:
   python app.py --port 5001
   ```
 
+### "Ollama not running" error
+
+- Only affects the optional local fallback routes (`/local-*`, `/compare`)
+- Solution: Use the Gemini endpoints instead, or run `ollama serve`
+
+### "CUDA out of memory" error
+
+- Only relevant if using Ollama or research routes
+- Solution: The app will automatically fall back to CPU
+
 ---
 
 ## Quick Start Summary
 
-After initial setup, here's what you need to do each time:
+After initial setup, here's all you need to do each time:
 
-1. **Open Command Prompt #1:**
-   ```cmd
-   ollama serve
-   ```
+```cmd
+cd "path\to\Insurance Policy Decoder"
+venv\Scripts\activate
+cd insurance_ai
+python app.py
+```
 
-2. **Open Command Prompt #2:**
-   ```cmd
-   cd "path\to\Insurance Policy Decoder"
-   venv\Scripts\activate
-   cd insurance_ai
-   python app.py
-   ```
-
-3. **Access the API at:** `http://localhost:5000`
+Then access the API at: `http://localhost:5000`
 
 ---
 
@@ -368,11 +320,11 @@ After initial setup, here's what you need to do each time:
 
 If you encounter issues:
 
-1. Make sure all prerequisites are installed
-2. Restart your computer (helps with PATH issues)
-3. Check that Ollama is running (`ollama serve`)
-4. Verify the virtual environment is activated (`(venv)` should appear in prompt)
+1. Make sure `GEMINI_API_KEY` is set in `insurance_ai/.env`
+2. Make sure the virtual environment is activated (`(venv)` in prompt)
+3. Check that all dependencies installed: `pip install -r requirements.txt`
+4. Restart your computer if PATH issues persist
 
 ---
 
-*Setup guide version 1.0*
+*Setup guide version 2.0*

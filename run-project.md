@@ -6,21 +6,9 @@ Quick reference for starting the Insurance Policy Decoder after setup is complet
 
 ## Daily Startup Steps
 
-### Step 1: Start Ollama (AI Engine)
+### Step 1: Start the Flask Server
 
 Open **Command Prompt** and run:
-
-```cmd
-ollama serve
-```
-
-> Keep this window open while using the application.
-
----
-
-### Step 2: Start the Flask Server
-
-Open a **new Command Prompt** window and run these commands:
 
 ```cmd
 cd "C:\path\to\Insurance Policy Decoder"
@@ -38,28 +26,28 @@ You should see:
  * Debug mode: on
 ```
 
+That's it — the server is ready. Gemini API calls go out over the internet, so no other service needs to be running.
+
 ---
 
-### Step 3: Verify Everything is Working
+### Step 2: Verify Everything is Working
 
 Open your browser and go to:
 
 - **Server Status:** http://localhost:5000/health
-- **AI Status:** http://localhost:5000/ollama/status
 
-Both should return success responses.
+You should see `{"status": "Flask server running"}`.
 
 ---
 
 ## Quick Commands Reference
 
-| Action                       | Command                 |
-| ---------------------------- | ----------------------- |
-| Start Ollama                 | `ollama serve`          |
-| Activate virtual environment | `venv\Scripts\activate` |
-| Run Flask server             | `python app.py`         |
-| Stop server                  | Press `Ctrl + C`        |
-| Deactivate venv              | `deactivate`            |
+| Action                       | Command                          |
+| ---------------------------- | -------------------------------- |
+| Activate virtual environment | `venv\Scripts\activate`          |
+| Run Flask server             | `python app.py`                  |
+| Stop server                  | Press `Ctrl + C`                 |
+| Deactivate venv              | `deactivate`                     |
 
 ---
 
@@ -71,24 +59,51 @@ Once running, the API is available at:
 http://localhost:5000
 ```
 
+### Primary Endpoints
+
+| Feature        | Endpoint                    |
+| -------------- | --------------------------- |
+| Upload file    | `POST /upload`              |
+| Summary        | `POST /gemini-api-summary`  |
+| Q&A            | `POST /gemini-api-qa`       |
+| Compare        | `POST /gemini-api-compare`  |
+| Risk Score     | `POST /gemini-risk-score`   |
+
+See **[api-documentation.md](api-documentation.md)** for the full API reference.
+
+---
+
+## Optional: Start Ollama (Local Fallback Only)
+
+Ollama is **not needed** for normal use. Start it only if you want to use the `/local-summary`, `/local-qa`, or `/compare` fallback routes.
+
+Open a separate **Command Prompt** and run:
+
+```cmd
+ollama serve
+```
+
+Keep that window open while using the local routes. Check status at: http://localhost:5000/ollama/status
+
 ---
 
 ## Shutting Down
 
 1. Press `Ctrl + C` in the Flask server window
-2. Press `Ctrl + C` in the Ollama window (or just close it)
-3. Type `deactivate` to exit the virtual environment (optional)
+2. Type `deactivate` to exit the virtual environment (optional)
+3. If Ollama was started, press `Ctrl + C` in that window too
 
 ---
 
 ## Troubleshooting Quick Fixes
 
-| Problem                    | Solution                                                        |
-| -------------------------- | --------------------------------------------------------------- |
-| "Ollama not running" error | Make sure `ollama serve` is running in another window           |
-| "Module not found" error   | Make sure venv is activated (you should see `(venv)` in prompt) |
-| Port 5000 in use           | Close other applications or use `python app.py --port 5001`     |
-| Server won't start         | Check if you're in the `insurance_ai` folder                    |
+| Problem                          | Solution                                                          |
+| -------------------------------- | ----------------------------------------------------------------- |
+| "API key not configured" error   | Add `GEMINI_API_KEY=your_key` to `insurance_ai/.env`             |
+| "Module not found" error         | Make sure venv is activated (you should see `(venv)` in prompt)  |
+| Port 5000 in use                 | Close other applications or use `python app.py --port 5001`      |
+| Server won't start               | Check if you're in the `insurance_ai` folder                     |
+| "Ollama not running" error       | Only affects `/local-*` routes — use `/gemini-*` instead         |
 
 ---
 

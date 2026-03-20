@@ -1,22 +1,22 @@
 # Insurance Policy Decoder
 
 > **AI-Powered Insurance Policy Analysis Tool**
-> Decode complex insurance documents with advanced NLP and local AI processing
+> Decode complex insurance documents using Google Gemini AI
 
 ---
 
 ## Overview
 
-**Insurance Policy Decoder** is an intelligent document analysis system that uses cutting-edge AI and Natural Language Processing to help users understand insurance policies. Upload any insurance document and get instant summaries, ask questions in natural language, and compare multiple policies side-by-side.
+**Insurance Policy Decoder** is an intelligent document analysis system that uses Google Gemini AI to help users understand insurance policies. Upload any insurance document and get instant summaries, ask questions in natural language, compare multiple policies side-by-side, and get a risk assessment.
 
 ### Key Features
 
-- **AI-Powered Summarization** - Generate comprehensive or quick summaries of insurance documents using local LLMs (Ollama/Llama 3.2)
+- **AI-Powered Summarization** - Generate comprehensive summaries of insurance documents using Google Gemini
 - **Intelligent Q&A System** - Ask questions about your policy in natural language and get accurate answers with source references
-- **Policy Comparison** - Compare two policies side-by-side across 20+ categories with AI-powered recommendations
-- **Multi-Format Support** - Process PDF, DOCX, and DOC files with advanced text extraction and OCR capabilities
-- **Privacy-First** - All processing happens locally using Ollama (optional cloud-based Gemini API also available)
-- **Fast & Efficient** - Optimized with semantic chunking, vector embeddings (FAISS), and caching
+- **Policy Comparison** - Compare two policies side-by-side across 20 categories with AI-powered recommendations
+- **Risk Scoring** - Get a transparent, rule-based risk assessment of any policy
+- **Multi-Format Support** - Process PDF, DOCX, and DOC files with advanced text extraction
+- **Cloud AI** - Powered by Google Gemini 2.5 Flash (no local GPU required)
 
 ---
 
@@ -24,26 +24,20 @@
 
 ### Backend
 - **Python 3.10+** with Flask framework
-- **Ollama** - Local LLM inference (Llama 3.2)
-- **Google Gemini API** - Optional cloud-based AI
+- **Google Gemini API** - Primary AI engine (cloud-based, no GPU needed)
+- **Ollama** - Optional local LLM fallback (Llama 3.2)
 
 ### AI/ML Libraries
-- **PyTorch** - Deep learning framework
-- **Transformers** (Hugging Face) - Pre-trained NLP models
+- **PyTorch** - Deep learning framework (used by research/academic routes)
+- **Transformers** (Hugging Face) - Pre-trained NLP models (research routes)
 - **Sentence Transformers** - Semantic text embeddings
-- **FAISS** - Fast similarity search for RAG (Retrieval Augmented Generation)
+- **FAISS** - Fast similarity search
 
 ### Document Processing
 - **pdfplumber** - PDF text extraction
 - **python-docx** - DOCX/DOC processing
 - **Tesseract OCR** - Scanned document processing
 - **Pillow** - Image processing
-
-### NLP Techniques
-- Semantic chunking with embeddings
-- Extractive summarization (BERT-based)
-- Question answering with RAG architecture
-- Vector similarity search
 
 ---
 
@@ -64,11 +58,11 @@ Insurance Policy Decoder/
 │   └── services/nlp/         # NLP and AI services
 │       ├── chunker.py                 # Text chunking
 │       ├── semantic_chunker.py        # Semantic-based chunking
-│       ├── extractive_summarizer.py   # BERT extractive summary
-│       ├── ollama_summarizer.py       # Ollama-based summary
-│       ├── ollama_qa_service.py       # Q&A with RAG
-│       ├── ollama_comparator.py       # Policy comparison
-│       ├── qa_service.py              # BERT-based Q&A
+│       ├── extractive_summarizer.py   # BERT extractive summary (research)
+│       ├── ollama_summarizer.py       # Ollama-based summary (fallback)
+│       ├── ollama_qa_service.py       # Q&A with RAG (fallback)
+│       ├── ollama_comparator.py       # Policy comparison (fallback)
+│       ├── qa_service.py              # BERT-based Q&A (research)
 │       └── ...
 │
 ├── setup.md                  # Detailed setup guide
@@ -84,8 +78,9 @@ Insurance Policy Decoder/
 ### Prerequisites
 
 - Windows 10/11 (64-bit)
-- 8GB RAM minimum (16GB recommended)
-- 10GB free disk space
+- 4GB RAM minimum
+- Internet connection (for Gemini API calls)
+- Google Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
 
 ### Installation & Setup
 
@@ -94,13 +89,8 @@ For detailed installation instructions, see **[setup.md](setup.md)**
 **Quick summary:**
 
 1. **Install Python 3.10+** from [python.org](https://www.python.org/downloads/)
-2. **Install Ollama** from [ollama.ai](https://ollama.ai/download)
-3. **Download AI Model:**
-   ```cmd
-   ollama serve
-   ollama pull llama3.2:3b
-   ```
-4. **Install Dependencies:**
+2. **Get a Gemini API key** from [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+3. **Install Dependencies:**
    ```cmd
    cd "Insurance Policy Decoder"
    python -m venv venv
@@ -108,8 +98,10 @@ For detailed installation instructions, see **[setup.md](setup.md)**
    cd insurance_ai
    pip install -r requirements.txt
    ```
-5. **Configure Environment (Optional):**
-   - Create [.env](insurance_ai/.env) file with `GEMINI_API_KEY=your_key` for cloud AI features
+4. **Configure API key** in `insurance_ai/.env`:
+   ```env
+   GEMINI_API_KEY=your_gemini_api_key_here
+   ```
 
 ### Running the Application
 
@@ -117,22 +109,15 @@ For detailed run instructions, see **[run-project.md](run-project.md)**
 
 **Quick start:**
 
-1. **Terminal 1 - Start Ollama:**
-   ```cmd
-   ollama serve
-   ```
+```cmd
+cd "Insurance Policy Decoder"
+venv\Scripts\activate
+cd insurance_ai
+python app.py
+```
 
-2. **Terminal 2 - Start Flask Server:**
-   ```cmd
-   cd "Insurance Policy Decoder"
-   venv\Scripts\activate
-   cd insurance_ai
-   python app.py
-   ```
-
-3. **Verify:**
-   - Server: http://localhost:5000/health
-   - AI Status: http://localhost:5000/ollama/status
+**Verify:**
+- Server: http://localhost:5000/health
 
 ---
 
@@ -142,13 +127,13 @@ The application provides a RESTful API for document analysis. For complete API d
 
 ### Core Endpoints
 
-| Feature | Endpoint | Description |
-|---------|----------|-------------|
-| **Upload** | `POST /upload` | Upload insurance document (PDF/DOCX/DOC) |
-| **Summary** | `POST /local-summary` | Generate AI summary (quick/standard/comprehensive) |
-| **Q&A** | `POST /local-qa` | Ask questions about the document |
-| **Compare** | `POST /compare` | Compare two policies side-by-side |
-| **Status** | `GET /ollama/status` | Check AI service availability |
+| Feature          | Endpoint                | Description                                         |
+| ---------------- | ----------------------- | --------------------------------------------------- |
+| **Upload**       | `POST /upload`          | Upload insurance document (PDF/DOCX/DOC)            |
+| **Summary**      | `POST /gemini-api-summary`  | Generate AI summary using Gemini                |
+| **Q&A**          | `POST /gemini-api-qa`       | Ask questions about the document                |
+| **Compare**      | `POST /gemini-api-compare`  | Compare two policies side-by-side               |
+| **Risk Score**   | `POST /gemini-risk-score`   | Get a risk assessment of the policy             |
 
 ### Example Usage
 
@@ -166,20 +151,17 @@ const { hash } = await response.json();
 
 **Generate summary:**
 ```javascript
-const response = await fetch('http://localhost:5000/local-summary', {
+const response = await fetch('http://localhost:5000/gemini-api-summary', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    hash: 'document_hash',
-    mode: 'standard'  // quick | standard | comprehensive
-  })
+  body: JSON.stringify({ hash: 'document_hash' })
 });
 const { summary } = await response.json();
 ```
 
 **Ask a question:**
 ```javascript
-const response = await fetch('http://localhost:5000/local-qa', {
+const response = await fetch('http://localhost:5000/gemini-api-qa', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -199,19 +181,14 @@ For more examples and detailed API specifications, see **[api-documentation.md](
 
 ### 1. Document Summarization
 
-Generate three levels of summaries:
+Gemini reads the full document and returns a structured markdown summary covering:
 
-- **Quick Mode** (~30s) - 20 categorized bullet points (COVERAGE, EXCLUSION, WARNING, etc.)
-- **Standard Mode** (~1-2 min) - Structured sections covering all key aspects
-- **Comprehensive Mode** (~3-5 min) - Detailed analysis with complete policy breakdown
-
-**Example output sections:**
 - Policy Overview
 - Coverage Details & Benefits
 - Costs & Financial Terms
 - Exclusions & Limitations
 - Claim Procedures
-- Important Warnings
+- Important Warnings & Red Flags
 
 ### 2. Intelligent Q&A
 
@@ -222,33 +199,37 @@ Ask natural language questions about your policy:
 - "How do I file a claim?"
 
 **Features:**
-- Confidence levels (high/medium/low)
-- Source references from the document
-- Suggested questions based on document content
-- Uses RAG (Retrieval Augmented Generation) for accurate answers
+- Confidence levels (high/medium/low/none)
+- Optional source excerpts from the document (`detailed: true`)
 
 ### 3. Policy Comparison
 
-Compare two policies across 20+ categories:
+Compare two policies across 20 categories:
 
 - Premium Amount, Deductible, Co-payment
 - Coverage Limits, Exclusions, Waiting Periods
 - Claim Process, Cancellation Terms, Special Benefits
-- AI-powered verdict and recommendations
-- Highlighted key differences
+- Key differences highlighted
+- AI verdict and recommendation
 
-### 4. Multi-Format Document Processing
+### 4. Risk Scoring
+
+Transparent, rule-based risk scoring:
+
+- Gemini extracts 5 key features (exclusions count, coverage amount, premium balance, waiting period, claim complexity)
+- Python applies fixed scoring rules to each feature
+- Final score maps to Low / Medium / High risk
+- Full breakdown with per-factor reasoning included
+
+### 5. Multi-Format Document Processing
 
 - **PDF**: Direct text extraction with pdfplumber
 - **DOCX/DOC**: Native Word document parsing
 - **Scanned PDFs**: OCR with Tesseract
-- **Smart Chunking**: Semantic-based text chunking for better context
 
 ---
 
 ## Documentation Files
-
-This project includes comprehensive documentation:
 
 | File | Purpose | When to Use |
 |------|---------|-------------|
@@ -261,16 +242,23 @@ This project includes comprehensive documentation:
 
 ## Configuration
 
-### Ollama Configuration
+### Environment Variables
 
-Change AI model or adjust settings:
+Create `insurance_ai/.env`:
 
-```javascript
-POST /ollama/configure
-{
-  "model": "llama3.2:3b",
-  "temperature": 0.3
-}
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+Get a free Gemini API key from: [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+
+### Optional: Ollama (Local Fallback)
+
+If you want to use the `/local-summary`, `/local-qa`, or `/compare` fallback routes, install Ollama:
+
+```cmd
+ollama serve
+ollama pull llama3.2:3b
 ```
 
 **Recommended models:**
@@ -278,28 +266,16 @@ POST /ollama/configure
 - `phi3:mini` - Fast, good quality
 - `mistral:7b` - Better quality (requires 8GB+ VRAM)
 
-### Environment Variables
-
-Create [insurance_ai/.env](insurance_ai/.env):
-
-```env
-GEMINI_API_KEY=your_gemini_api_key_here
-```
-
-Get Gemini API key from: https://aistudio.google.com/apikey
-
 ---
 
 ## Troubleshooting
 
-### Common Issues
-
 | Problem | Solution |
 |---------|----------|
-| "Ollama not running" | Run `ollama serve` in separate terminal |
-| "Model not found" | Download model: `ollama pull llama3.2:3b` |
+| "API key not configured" | Add `GEMINI_API_KEY` to `insurance_ai/.env` |
 | "Python not recognized" | Add Python to PATH (reinstall with checkbox) |
 | Port 5000 in use | Use different port: `python app.py --port 5001` |
+| "Ollama not running" | Only needed for fallback routes — use Gemini endpoints instead |
 
 For more troubleshooting tips, see **[setup.md](setup.md)**
 
@@ -307,42 +283,38 @@ For more troubleshooting tips, see **[setup.md](setup.md)**
 
 ## System Requirements
 
-### Minimum
+### Minimum (Gemini API mode)
 - Windows 10/11 (64-bit)
+- 4GB RAM
+- Internet connection
+- No GPU required
+
+### If using Ollama (local fallback)
 - 8GB RAM
 - 4GB VRAM (for GPU acceleration) or CPU
-- 10GB free disk space
-
-### Recommended
-- 16GB RAM
-- 6GB+ VRAM (NVIDIA GPU)
-- SSD storage
+- 10GB free disk space for models
 
 ---
 
 ## Performance
 
-| Operation | Time (approx.) | Notes |
-|-----------|---------------|-------|
-| Document upload | 1-3 seconds | Depends on file size |
-| Quick summary | 30-60 seconds | 20 bullet points |
-| Standard summary | 1-2 minutes | Full structured summary |
-| First Q&A | 30-60 seconds | Includes document preparation |
-| Follow-up Q&A | 10-30 seconds | Uses cached embeddings |
-| Policy comparison | 2-4 minutes | Full 20-category comparison |
-
-*Times based on Llama 3.2 3B model with 4GB VRAM*
+| Operation               | Time (approx.) | Notes                        |
+| ----------------------- | -------------- | ---------------------------- |
+| Document upload         | 1-3 seconds    | Depends on file size         |
+| Gemini summary          | 10-30 seconds  | Full structured summary      |
+| Gemini Q&A              | 5-15 seconds   | Per question                 |
+| Gemini comparison       | 15-40 seconds  | Full 20-category comparison  |
+| Gemini risk score       | 8-20 seconds   | Includes scoring breakdown   |
 
 ---
 
 ## Technical Highlights
 
-- **RAG Architecture** - Retrieval Augmented Generation for accurate Q&A
-- **Semantic Search** - FAISS vector database for fast similarity search
-- **Smart Caching** - Document embeddings cached for faster responses
-- **Hybrid NLP** - Combines extractive and generative AI techniques
-- **Confidence Scoring** - Provides answer reliability metrics
-- **Source Attribution** - Links answers back to source text
+- **Gemini Cloud AI** - Full document understanding without local GPU
+- **Rule-Based Risk Scoring** - Deterministic, auditable scoring on top of AI extraction
+- **Research Routes Included** - BERT-based extractive summarization and QA for academic comparison (`/scratch-*`)
+- **Ollama Fallback** - Local LLM routes available when cloud AI is unavailable
+- **Source Attribution** - Answers linked back to source text excerpts
 
 ---
 
@@ -358,17 +330,17 @@ For issues, questions, or feature requests:
 
 1. Check the documentation files ([setup.md](setup.md), [run-project.md](run-project.md), [api-documentation.md](api-documentation.md))
 2. Review the troubleshooting sections
-3. Ensure Ollama is running and model is downloaded
-4. Verify all dependencies are installed correctly
+3. Verify `GEMINI_API_KEY` is set in `insurance_ai/.env`
+4. Ensure all dependencies are installed correctly
 
 ---
 
 ## Credits
 
 **AI Models:**
-- Llama 3.2 (Meta AI)
-- Google Gemini
-- RoBERTa (Hugging Face)
+- Google Gemini 2.5 Flash (primary)
+- Llama 3.2 (Meta AI) — optional fallback
+- RoBERTa (Hugging Face) — research routes
 
 **Libraries:**
 - PyTorch, Transformers, Sentence-Transformers
@@ -377,6 +349,6 @@ For issues, questions, or feature requests:
 
 ---
 
-**Built with advanced AI and NLP techniques for practical insurance policy analysis**
+**Built with Google Gemini AI for practical insurance policy analysis**
 
-*Last updated: January 2026*
+*Last updated: March 2026*
