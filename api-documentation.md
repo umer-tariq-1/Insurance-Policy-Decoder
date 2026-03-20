@@ -25,13 +25,15 @@ Complete API reference for frontend integration.
    - [Gemini API Comparison (Recommended)](#gemini-api-comparison-recommended)
    - [Local AI Comparison](#local-ai-comparison)
    - [Quick Comparison](#quick-comparison)
-6. [System & Configuration](#system--configuration)
+6. [Risk Scoring](#risk-scoring)
+   - [Gemini Risk Score (Recommended)](#gemini-risk-score-recommended)
+7. [System & Configuration](#system--configuration)
    - [Health Check](#health-check)
    - [Ollama Status](#ollama-status)
    - [Configure Ollama](#configure-ollama)
    - [Clear Caches](#clear-caches)
-7. [Error Handling](#error-handling)
-8. [Integration Examples](#integration-examples)
+8. [Error Handling](#error-handling)
+9. [Integration Examples](#integration-examples)
 
 ---
 
@@ -51,11 +53,12 @@ Complete API reference for frontend integration.
 
 Use these Gemini endpoints as the primary implementation:
 
-| Feature    | Primary Route           | Fallback (if no API key) |
-| ---------- | ----------------------- | ------------------------ |
-| Summary    | `/gemini-api-summary`   | `/local-summary`         |
-| Q&A        | `/gemini-api-qa`        | `/local-qa`              |
-| Comparison | `/gemini-api-compare`   | `/compare`               |
+| Feature      | Primary Route           | Fallback (if no API key) |
+| ------------ | ----------------------- | ------------------------ |
+| Summary      | `/gemini-api-summary`   | `/local-summary`         |
+| Q&A          | `/gemini-api-qa`        | `/local-qa`              |
+| Comparison   | `/gemini-api-compare`   | `/compare`               |
+| Risk Scoring | `/gemini-risk-score`    | —                        |
 
 > **Why Gemini?** The local machine does not have sufficient GPU resources to run local pretrained models reliably. Gemini API provides fast, high-quality results without local hardware requirements.
 
@@ -710,6 +713,135 @@ Faster comparison focusing on top 10 differences. Uses local Ollama.
 
 ---
 
+## Risk Scoring
+
+### Gemini Risk Score (Recommended)
+
+Calculate a rule-based risk score for an insurance policy. Gemini extracts structured features from the document, and Python applies deterministic scoring rules to produce a transparent, explainable risk classification.
+
+**Endpoint:** `POST /gemini-risk-score`
+
+**Content-Type:** `application/json`
+
+**Request Body:**
+
+```json
+{
+  "hash": "a1b2c3d4e5f6789..."
+}
+```
+
+| Field | Type   | Required | Description               |
+| ----- | ------ | -------- | ------------------------- |
+| hash  | string | Yes      | Document hash from upload |
+
+**How Scoring Works:**
+
+Gemini reads the document and extracts 5 features. Python then scores each feature using the fixed rules below:
+
+| Policy Factor    | Condition                     | Risk Points |
+| ---------------- | ----------------------------- | ----------- |
+| Exclusions       | More than 10 exclusions       | +3          |
+| Exclusions       | 5–10 exclusions               | +2          |
+| Exclusions       | Fewer than 5 exclusions       | 0           |
+| Coverage Amount  | Coverage below industry avg   | +2          |
+| Coverage Amount  | High coverage                 | 0           |
+| Premium          | High premium with low coverage| +2          |
+| Premium          | Balanced premium and coverage | 0           |
+| Waiting Period   | Waiting period > 6 months     | +2          |
+| Waiting Period   | Waiting period ≤ 6 months     | 0           |
+| Claim Conditions | Strict or complex process     | +3          |
+| Claim Conditions | Simple claim process          | 0           |
+
+**Final Classification:**
+
+| Total Score | Risk Level   |
+| ----------- | ------------ |
+| 0 – 2       | Low Risk     |
+| 3 – 5       | Medium Risk  |
+| 6 or above  | High Risk    |
+
+**Response (Success - 200):**
+
+```json
+{
+  "hash": "a1b2c3d4e5f6789...",
+  "risk_level": "Medium Risk",
+  "total_score": 4,
+  "score_breakdown": [
+    {
+      "factor": "Exclusions",
+      "condition": "5–10 exclusions",
+      "detected_value": 7,
+      "points": 2,
+      "reasoning": "Found 7 distinct exclusions listed under Section 4, including cosmetic surgery, experimental treatments, and pre-existing conditions."
+    },
+    {
+      "factor": "Coverage Amount",
+      "condition": "High coverage",
+      "detected_value": "high",
+      "points": 0,
+      "reasoning": "Coverage limit of $1,000,000 lifetime is at or above industry standard for this policy type."
+    },
+    {
+      "factor": "Premium",
+      "condition": "Balanced premium and coverage",
+      "detected_value": "balanced",
+      "points": 0,
+      "reasoning": "The $500/month premium is proportionate to the comprehensive coverage provided."
+    },
+    {
+      "factor": "Waiting Period",
+      "condition": "Waiting period > 6 months",
+      "detected_value": "9.0 months",
+      "points": 2,
+      "reasoning": "A 9-month waiting period is stated for pre-existing conditions under Section 2."
+    },
+    {
+      "factor": "Claim Conditions",
+      "condition": "Simple claim process",
+      "detected_value": "simple",
+      "points": 0,
+      "reasoning": "The claim process requires only a standard form submission within 90 days, with no complex pre-authorization requirements."
+    }
+  ],
+  "model": "gemini-2.5-flash"
+}
+```
+
+| Field                          | Type    | Description                                              |
+| ------------------------------ | ------- | -------------------------------------------------------- |
+| hash                           | string  | Document hash                                            |
+| risk_level                     | string  | Final classification: `"Low Risk"`, `"Medium Risk"`, or `"High Risk"` |
+| total_score                    | integer | Sum of all risk points (max: 12)                         |
+| score_breakdown                | array   | Per-factor scoring detail (always 5 entries)             |
+| score_breakdown[].factor       | string  | Policy factor name                                       |
+| score_breakdown[].condition    | string  | The matched condition from the scoring rules table       |
+| score_breakdown[].detected_value | mixed | The raw value Gemini extracted from the document         |
+| score_breakdown[].points       | integer | Risk points assigned for this factor                     |
+| score_breakdown[].reasoning    | string  | Gemini's explanation for its extracted value             |
+| model                          | string  | AI model used for feature extraction                     |
+
+**Response (Error - 404):**
+
+```json
+{
+  "error": "File not found"
+}
+```
+
+**Response (Error - 500):**
+
+```json
+{
+  "error": "Failed to calculate risk score: ..."
+}
+```
+
+**Purpose:** Give users a quick, transparent risk assessment of their insurance policy. The scoring logic is fully rule-based and deterministic — only the feature extraction step uses AI, making the output auditable and explainable.
+
+---
+
 ## System & Configuration
 
 ### Health Check
@@ -956,6 +1088,30 @@ async function comparePolicies(hash1, hash2) {
 }
 ```
 
+### Risk Scoring Flow
+
+```javascript
+async function getRiskScore(hash) {
+  const response = await fetch("http://localhost:5000/gemini-risk-score", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hash }),
+  });
+
+  const data = await response.json();
+
+  if (data.error) {
+    console.error("Risk scoring failed:", data.error);
+    return null;
+  }
+
+  // data.risk_level: "Low Risk" | "Medium Risk" | "High Risk"
+  // data.total_score: number (0–12)
+  // data.score_breakdown: array of 5 factor objects, each with points and reasoning
+  return data;
+}
+```
+
 ---
 
 ## Quick Reference
@@ -968,6 +1124,7 @@ async function comparePolicies(hash1, hash2) {
 | Generate summary | `/gemini-api-summary`   | POST             |
 | Ask question     | `/gemini-api-qa`        | POST             |
 | Compare policies | `/gemini-api-compare`   | POST             |
+| Risk scoring     | `/gemini-risk-score`    | POST             |
 | Health check     | `/health`               | GET              |
 
 ### Response Times (Approximate)
@@ -978,6 +1135,7 @@ async function comparePolicies(hash1, hash2) {
 | `/gemini-api-summary`   | 10-30 seconds  |
 | `/gemini-api-qa`        | 5-15 seconds   |
 | `/gemini-api-compare`   | 15-40 seconds  |
+| `/gemini-risk-score`    | 8-20 seconds   |
 
 ---
 

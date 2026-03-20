@@ -1090,5 +1090,190 @@ Respond ONLY with valid JSON (no markdown, no extra text):
         return jsonify({"error": f"Failed to compare documents: {str(e)}"}), 500
 
 
+@app.route("/gemini-risk-score", methods=["POST"])
+def gemini_risk_score():
+    """
+    Analyze insurance policy risk using Gemini for feature extraction
+    and rule-based scoring.
+
+    Request body:
+    {
+        "hash": "document_hash"
+    }
+
+    Scoring Rules:
+    - Exclusions: >10 → +3, 5–10 → +2, <5 → 0
+    - Coverage Amount: below industry average → +2, high → 0
+    - Premium: high with low coverage → +2, balanced → 0
+    - Waiting Period: >6 months → +2, ≤6 months → 0
+    - Claim Conditions: strict/complex → +3, simple → 0
+
+    Final Classification:
+    - 0–2: Low Risk
+    - 3–5: Medium Risk
+    - 6+:  High Risk
+    """
+    data = request.get_json()
+
+    if not data or "hash" not in data:
+        return jsonify({"error": "Hash required in request body"}), 400
+
+    file_hash = data["hash"]
+
+    file_path = None
+    for extension in ["pdf", "docx", "doc"]:
+        potential_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_hash}.{extension}")
+        if os.path.exists(potential_path):
+            file_path = potential_path
+            break
+
+    if not file_path:
+        return jsonify({"error": "File not found"}), 404
+
+    try:
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        uploaded_file = client.files.upload(file=file_path)
+
+        prompt = """You are an insurance policy analyst. Analyze this insurance policy document and extract the following features for risk scoring.
+
+Respond ONLY with valid JSON (no markdown, no extra text):
+{
+  "exclusion_count": <integer: total number of distinct exclusions listed in this policy>,
+  "coverage_level": "<'high' if coverage is at or above industry standard, 'below_average' if coverage is below industry average>",
+  "premium_balance": "<'high_with_low_coverage' if the premium is high relative to the coverage provided, 'balanced' if the premium is fair relative to coverage>",
+  "waiting_period_months": <number: the longest waiting period mentioned in months, use 0 if none mentioned>,
+  "claim_complexity": "<'strict' if the claim process has many conditions, strict requirements, or complex steps, 'simple' if the claim process is straightforward>",
+  "reasoning": {
+    "exclusions": "brief explanation of how you identified and counted the exclusions",
+    "coverage": "brief explanation of your coverage level assessment",
+    "premium": "brief explanation of your premium vs coverage assessment",
+    "waiting_period": "brief explanation of the waiting period found",
+    "claim": "brief explanation of claim complexity assessment"
+  }
+}"""
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[uploaded_file, prompt]
+        )
+
+        client.files.delete(name=uploaded_file.name)
+
+        response_text = response.text.strip()
+        response_text = re.sub(r"^```(?:json)?\s*", "", response_text)
+        response_text = re.sub(r"\s*```$", "", response_text)
+
+        try:
+            features = json.loads(response_text)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                features = json.loads(json_match.group())
+            else:
+                return jsonify({"error": "Failed to parse Gemini feature extraction response"}), 500
+
+        # --- Rule-based scoring ---
+        score_breakdown = []
+        total_score = 0
+
+        # Exclusions
+        exclusion_count = int(features.get("exclusion_count", 0))
+        if exclusion_count > 10:
+            pts, condition = 3, "More than 10 exclusions"
+        elif exclusion_count >= 5:
+            pts, condition = 2, "5–10 exclusions"
+        else:
+            pts, condition = 0, "Fewer than 5 exclusions"
+        total_score += pts
+        score_breakdown.append({
+            "factor": "Exclusions",
+            "condition": condition,
+            "detected_value": exclusion_count,
+            "points": pts,
+            "reasoning": features.get("reasoning", {}).get("exclusions", "")
+        })
+
+        # Coverage Amount
+        coverage_level = features.get("coverage_level", "high")
+        if coverage_level == "below_average":
+            pts, condition = 2, "Coverage below industry average"
+        else:
+            pts, condition = 0, "High coverage"
+        total_score += pts
+        score_breakdown.append({
+            "factor": "Coverage Amount",
+            "condition": condition,
+            "detected_value": coverage_level,
+            "points": pts,
+            "reasoning": features.get("reasoning", {}).get("coverage", "")
+        })
+
+        # Premium
+        premium_balance = features.get("premium_balance", "balanced")
+        if premium_balance == "high_with_low_coverage":
+            pts, condition = 2, "High premium with low coverage"
+        else:
+            pts, condition = 0, "Balanced premium and coverage"
+        total_score += pts
+        score_breakdown.append({
+            "factor": "Premium",
+            "condition": condition,
+            "detected_value": premium_balance,
+            "points": pts,
+            "reasoning": features.get("reasoning", {}).get("premium", "")
+        })
+
+        # Waiting Period
+        waiting_period_months = float(features.get("waiting_period_months", 0))
+        if waiting_period_months > 6:
+            pts, condition = 2, "Waiting period > 6 months"
+        else:
+            pts, condition = 0, "Waiting period ≤ 6 months"
+        total_score += pts
+        score_breakdown.append({
+            "factor": "Waiting Period",
+            "condition": condition,
+            "detected_value": f"{waiting_period_months} months",
+            "points": pts,
+            "reasoning": features.get("reasoning", {}).get("waiting_period", "")
+        })
+
+        # Claim Conditions
+        claim_complexity = features.get("claim_complexity", "simple")
+        if claim_complexity == "strict":
+            pts, condition = 3, "Strict or complex claim process"
+        else:
+            pts, condition = 0, "Simple claim process"
+        total_score += pts
+        score_breakdown.append({
+            "factor": "Claim Conditions",
+            "condition": condition,
+            "detected_value": claim_complexity,
+            "points": pts,
+            "reasoning": features.get("reasoning", {}).get("claim", "")
+        })
+
+        # Final classification
+        if total_score <= 2:
+            risk_level = "Low Risk"
+        elif total_score <= 5:
+            risk_level = "Medium Risk"
+        else:
+            risk_level = "High Risk"
+
+        return jsonify({
+            "hash": file_hash,
+            "risk_level": risk_level,
+            "total_score": total_score,
+            "score_breakdown": score_breakdown,
+            "model": "gemini-2.5-flash"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to calculate risk score: {str(e)}"}), 500
+
+
 if __name__ == "__main__":
     app.run(debug=True)
